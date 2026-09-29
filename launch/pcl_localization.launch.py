@@ -36,12 +36,8 @@ def generate_launch_description():
         description='Full path to the PCD map file to override the default in YAML.'
     )
 
-    lidar_tf = launch_ros.actions.Node(
-        name='lidar_tf',
-        package='tf2_ros',
-        executable='static_transform_publisher',
-        arguments=['0','0','0','0','0','0','1','base_link','velodyne']
-        )
+    # base_link -> velodyne の静的 TF は pcl_localization ノード自身が配信する
+    # （src/ekf/config/ekf.yaml の lidar_offset / lidar_rotation）
 
     imu_tf = launch_ros.actions.Node(
         name='imu_tf',
@@ -57,6 +53,14 @@ def generate_launch_description():
             'param',
             'localization.yaml'))
 
+    # EKF のパラメータ（src/ekf/config/ekf.yaml からインストールされる）
+    ekf_param_dir = launch.substitutions.LaunchConfiguration(
+        'ekf_param_dir',
+        default=os.path.join(
+            get_package_share_directory('pcl_localization_ros2'),
+            'config',
+            'ekf.yaml'))
+
     pcl_localization = launch_ros.actions.LifecycleNode(
         name='pcl_localization',
         namespace='',
@@ -64,6 +68,7 @@ def generate_launch_description():
         executable='pcl_localization_node',
         parameters=[
             localization_param_dir,
+            ekf_param_dir,
             {'map_path': LaunchConfiguration('map_path_arg')}
         ],
         remappings=[('/cloud','/velodyne_points'),
@@ -75,6 +80,9 @@ def generate_launch_description():
         executable='rviz2',
         name='rviz2',
         arguments=['-d', LaunchConfiguration('rviz_config')],
+        # 点群の stamp は別 PC の時計なので、RViz は点群と同じ時刻で配信される /tf_rviz を TF として使う
+        # （/tf_static はそのまま。静的 TF は時刻に依存しない）
+        remappings=[('/tf', '/tf_rviz')],
         output='screen'
     )
 
@@ -115,12 +123,13 @@ def generate_launch_description():
     )
 
     ld.add_action(rviz_config_arg)
+    ld.add_action(rviz_node)
     ld.add_action(map_path_arg)
     ld.add_action(from_unconfigured_to_inactive)
     ld.add_action(from_inactive_to_active)
 
     ld.add_action(pcl_localization)
-    ld.add_action(lidar_tf)
+    ld.add_action(imu_tf)
     ld.add_action(to_inactive)
 
     return ld

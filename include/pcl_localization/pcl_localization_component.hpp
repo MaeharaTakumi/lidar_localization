@@ -13,6 +13,7 @@
 #include <tf2_ros/buffer.h>
 #include <tf2_ros/transform_listener.h>
 #include <tf2_ros/transform_broadcaster.h>
+#include <tf2_ros/static_transform_broadcaster.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.h>
 #include <tf2_sensor_msgs/tf2_sensor_msgs.h>
 #include <tf2_eigen/tf2_eigen.h>
@@ -26,6 +27,8 @@
 #include "sensor_msgs/msg/imu.hpp"
 #include "nav_msgs/msg/odometry.hpp"
 #include "nav_msgs/msg/path.hpp"
+#include "std_msgs/msg/float32_multi_array.hpp"
+#include "tf2_msgs/msg/tf_message.hpp"
 
 #include <pclomp/ndt_omp.h>
 #include <pclomp/ndt_omp_impl.hpp>
@@ -35,6 +38,9 @@
 #include <pclomp/gicp_omp_impl.hpp>
 
 #include "pcl_localization/lidar_undistortion.hpp"
+#include "ekf/ekf_params.hpp"
+#include "ekf/vehicle_ekf.hpp"
+#include "ekf/vehicle_odom_ekf.hpp"
 
 using namespace std::chrono_literals;
 
@@ -55,11 +61,30 @@ public:
   void initializeParameters();
   void initializePubSub();
   void initializeRegistration();
+  void initializeEkf();
   void initialPoseReceived(const geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr msg);
   void mapReceived(const sensor_msgs::msg::PointCloud2::SharedPtr msg);
   void odomReceived(const nav_msgs::msg::Odometry::ConstSharedPtr msg);
+  /// オドメトリの受け口。ndt_odom なら観測として EKF を更新し、ndt_only なら予測だけ進める
+  void updateVelocity(
+    double v, double omega, const Eigen::Vector2d & r_msg, const rclcpp::Time & stamp);
+  /// time_source_ に従って EKF へ渡す時刻 [s] を返す
+  double ekfTime(const rclcpp::Time & stamp);
   void imuReceived(const sensor_msgs::msg::Imu::ConstSharedPtr msg);
   void cloudReceived(const sensor_msgs::msg::PointCloud2::ConstSharedPtr msg);
+  /// EKF の推定値を /ekf_pose に配信する（stamp は EKF の t_last）
+  void publishEkfPose();
+  void fillEkfPose(geometry_msgs::msg::PoseWithCovarianceStamped & out) const;
+  /// base_link 基準の姿勢を LiDAR 基準に変換する（pose_output_frame: "lidar" 用）
+  geometry_msgs::msg::PoseWithCovarianceStamped toLidarPose(
+    const geometry_msgs::msg::PoseWithCovarianceStamped & base) const;
+  bool ekfInitialized() const;
+  void ekfPredictTo(double t);
+  void ekfReset();
+  /// EKF が推定した map → LiDAR 姿勢（NDT の init_guess 用）
+  Eigen::Affine3d ekfLidarPose() const;
+  /// base_link → LiDAR の静的 TF を配信する（lidar_offset / lidar_rotation）
+  void publishLidarStaticTf();
   // void gnssReceived();
 
   tf2_ros::TransformBroadcaster broadcaster_;
@@ -75,6 +100,13 @@ public:
     path_pub_;
   rclcpp_lifecycle::LifecyclePublisher<sensor_msgs::msg::PointCloud2>::SharedPtr
     initial_map_pub_;
+  rclcpp_lifecycle::LifecyclePublisher<std_msgs::msg::Float32MultiArray>::SharedPtr
+    debug_pub_;
+  // RViz 専用の TF（map -> base_link、stamp は点群ヘッダの時刻）。RViz は /tf をこれに remap する
+  rclcpp_lifecycle::LifecyclePublisher<tf2_msgs::msg::TFMessage>::SharedPtr
+    rviz_tf_pub_;
+  rclcpp_lifecycle::LifecyclePublisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr
+    ekf_pose_pub_;
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::ConstSharedPtr
     map_sub_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::ConstSharedPtr
@@ -118,11 +150,28 @@ public:
   double initial_pose_qw_;
 
   bool use_odom_{false};
-  double last_odom_received_time_;
   bool use_imu_{false};
   bool enable_debug_{false};
+  bool enable_debug_topic_{false};
 
-  int ndt_num_threads_;
+  int ndt_num_threads_{0};
+
+  // 速度入力（段階3）
+  std::string ros2_mode_;
+  std::string odom_topic_;  // ros2_mode "Real" で購読する nav_msgs/Odometry
+  // 点群の時刻の出どころ："receipt"（この PC の受信時刻）or "message"（ヘッダ stamp）。
+  // 点群は別 PC（時刻同期なし）が stamp を付けているので既定は receipt
+  std::string scan_time_source_{"receipt"};
+  std::string pose_output_frame_{"base_link"};
+  bool publish_rviz_tf_{true};
+
+  // EKF（src/ekf/。パラメータは src/ekf/config/ekf.yaml）
+  pcl_localization::EkfConfig ekf_cfg_;
+  // ekf_model に応じて VehicleEkf（NDT のみ）か VehicleOdomEkf（NDT ＋ オドメトリ観測）
+  std::unique_ptr<pcl_localization::VehicleEkf> ekf_;
+  // ekf_ が VehicleOdomEkf のときだけ非 null（所有しない）
+  pcl_localization::VehicleOdomEkf * odom_ekf_{nullptr};
+  std::shared_ptr<tf2_ros::StaticTransformBroadcaster> static_broadcaster_;
 
   // imu
   LidarUndistortion lidar_undistortion_;

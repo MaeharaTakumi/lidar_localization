@@ -17,7 +17,9 @@ find_package(lifecycle_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
 find_package(tf2_ros REQUIRED)
+find_package(tf2_msgs REQUIRED)
 find_package(tf2_geometry_msgs  REQUIRED)
 find_package(tf2_sensor_msgs  REQUIRED)
 find_package(tf2_eigen REQUIRED)
@@ -34,10 +36,14 @@ endif()
 
 add_library(pcl_localization_component SHARED
 src/pcl_localization_component.cpp
+src/ekf/vehicle_ekf.cpp
+src/ekf/vehicle_odom_ekf.cpp
+src/ekf/ekf_params.cpp
 )
 
 ament_target_dependencies(pcl_localization_component
   rclcpp
+  rclcpp_lifecycle
   tf2_ros
   tf2_geometry_msgs
   tf2_sensor_msgs
@@ -45,12 +51,15 @@ ament_target_dependencies(pcl_localization_component
   geometry_msgs
   sensor_msgs
   nav_msgs
+  std_msgs
+  tf2_msgs
   pcl_conversions
   ndt_omp_ros2
 )
 
 include_directories(
   include
+  src   # src/ekf/*.hpp（パッケージ内専用）
   ${PCL_INCLUDE_DIRS}
   ${lifecycle_msgs_INCLUDE_DIRS}
   ${rclcpp_lifecycle_INCLUDE_DIRS}
@@ -85,5 +94,28 @@ install(DIRECTORY
   param
   DESTINATION share/${PROJECT_NAME}/
 )
+
+# EKF のパラメータ（share/pcl_localization_ros2/config/ekf.yaml）
+install(
+  DIRECTORY src/ekf/config/
+  DESTINATION share/${PROJECT_NAME}/config
+)
+
+install(
+  DIRECTORY rviz/
+  DESTINATION share/${PROJECT_NAME}/rviz
+)
+
+if(BUILD_TESTING)
+  # EKF の単体テスト（ROS 非依存）。colcon test --packages-select pcl_localization_ros2
+  find_package(ament_cmake_gtest REQUIRED)
+  find_package(Eigen3 REQUIRED)
+  ament_add_gtest(test_vehicle_ekf
+    test/test_vehicle_ekf.cpp
+    src/ekf/vehicle_ekf.cpp
+    src/ekf/vehicle_odom_ekf.cpp
+  )
+  target_include_directories(test_vehicle_ekf PRIVATE src ${EIGEN3_INCLUDE_DIR})
+endif()
 
 ament_package()
