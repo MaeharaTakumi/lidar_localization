@@ -27,7 +27,6 @@
       initial_pose_qy: 0.0
       initial_pose_qz: 0.0
       initial_pose_qw: 1.0
-      use_odom: true
       use_imu: false
       enable_debug: false
       enable_debug_topic: true
@@ -36,25 +35,26 @@
       base_frame_id: base_link
       # enable_debug: true
 
-      # ---- 速度入力（段階3）----
-      # 速度入力の購読先（どちらも nav_msgs/Odometry）
-      #   "Gazebo" : odom
-      #   "Real"   : odom_topic（whill_odometry の出力）
-      ros2_mode: "Real"
-      odom_topic: "/wheelchair/odom"
-
       # 点群の時刻。点群は別 PC（時刻同期なし）が stamp を付けているため既定は受信時刻
-      #   "receipt" : この PC で受信した時刻（now()）。出力の stamp と EKF の観測時刻に使う
-      #   "message" : 点群ヘッダの stamp（時刻同期済みの環境や stamp を直した bag 用）
+      #   "receipt" : この PC で受信した時刻（now()）。出力と /ndt_pose の stamp に使う
+      #   "message" : 点群ヘッダの stamp（時刻同期済み・Gazebo・cloud_stamp_corrector で直した点群）
+      # localization_bringup から起動するときは "message"（同期していない環境は cloud_stamp_corrector が直す）
       scan_time_source: "receipt"
 
       # /pcl_pose (→/current_pose) の基準。TF（map -> base_link）と /path は常に base_link
       #   "base_link" : 車両中心
-      #   "lidar"     : LiDAR 中心（base_link に取付 lidar_offset / lidar_rotation を合成した姿勢）
+      #   "lidar"     : LiDAR 中心（NDT の解そのもの）
+      # base_link への変換に使う取付 base_link -> LiDAR は静的 TF から読む
       pose_output_frame: "lidar"
 
       # RViz 専用 TF。map -> base_link を点群ヘッダの時刻で /tf_rviz に配信する
       # （launch で RViz の /tf を /tf_rviz に remap。/tf と /current_pose はこの PC の時刻のまま）
       publish_rviz_tf: true
 
-      # EKF のパラメータは src/ekf/config/ekf.yaml（launch で併せて渡す）
+      # ---- EKF（ekf_localizer）との連携 ----
+      # 単体で使うときは既定のまま。localization_bringup で EKF と起動するときは launch が上書きする
+      publish_tf: true                  # map -> base_link の TF を配信するか（EKF が配信するときは false）
+      use_tf_init_guess: false          # NDT の初期値を TF（EKF の推定値）から点群の取得時刻で引くか
+      tf_init_guess_timeout: 0.05       # 上の TF を待つ時間 [s]
+      use_fitness_reject: false         # fitness_score が閾値を超えた解を /ndt_pose に出さないか
+      fitness_reject_threshold: 1.0     # 上の閾値

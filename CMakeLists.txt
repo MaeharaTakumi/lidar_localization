@@ -12,6 +12,7 @@ endif()
 SET(CMAKE_CXX_FLAGS "-O2 -g ${CMAKE_CXX_FLAGS}")
 
 find_package(ament_cmake REQUIRED)
+find_package(rclcpp REQUIRED)
 find_package(rclcpp_lifecycle REQUIRED)
 find_package(lifecycle_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
@@ -36,9 +37,6 @@ endif()
 
 add_library(pcl_localization_component SHARED
 src/pcl_localization_component.cpp
-src/ekf/vehicle_ekf.cpp
-src/ekf/vehicle_odom_ekf.cpp
-src/ekf/ekf_params.cpp
 )
 
 ament_target_dependencies(pcl_localization_component
@@ -59,7 +57,6 @@ ament_target_dependencies(pcl_localization_component
 
 include_directories(
   include
-  src   # src/ekf/*.hpp（パッケージ内専用）
   ${PCL_INCLUDE_DIRS}
   ${lifecycle_msgs_INCLUDE_DIRS}
   ${rclcpp_lifecycle_INCLUDE_DIRS}
@@ -77,10 +74,15 @@ link_directories(
 )
 add_definitions(${PCL_DEFINITIONS})
 
+# 点群の stamp を、この PC の時計での取得時刻に直して配信し直す（時刻同期していない環境用）
+add_executable(cloud_stamp_corrector src/cloud_stamp_corrector.cpp)
+ament_target_dependencies(cloud_stamp_corrector rclcpp sensor_msgs)
+
 ament_export_libraries(pcl_localization_component)
 
 install(TARGETS
   pcl_localization_node
+  cloud_stamp_corrector
   DESTINATION lib/${PROJECT_NAME})
 
 install(TARGETS
@@ -95,27 +97,9 @@ install(DIRECTORY
   DESTINATION share/${PROJECT_NAME}/
 )
 
-# EKF のパラメータ（share/pcl_localization_ros2/config/ekf.yaml）
-install(
-  DIRECTORY src/ekf/config/
-  DESTINATION share/${PROJECT_NAME}/config
-)
-
 install(
   DIRECTORY rviz/
   DESTINATION share/${PROJECT_NAME}/rviz
 )
-
-if(BUILD_TESTING)
-  # EKF の単体テスト（ROS 非依存）。colcon test --packages-select pcl_localization_ros2
-  find_package(ament_cmake_gtest REQUIRED)
-  find_package(Eigen3 REQUIRED)
-  ament_add_gtest(test_vehicle_ekf
-    test/test_vehicle_ekf.cpp
-    src/ekf/vehicle_ekf.cpp
-    src/ekf/vehicle_odom_ekf.cpp
-  )
-  target_include_directories(test_vehicle_ekf PRIVATE src ${EIGEN3_INCLUDE_DIR})
-endif()
 
 ament_package()

@@ -28,15 +28,10 @@ PCLLocalization::PCLLocalization(const rclcpp::NodeOptions & options)
   declare_parameter("initial_pose_qy", 0.0);
   declare_parameter("initial_pose_qz", 0.0);
   declare_parameter("initial_pose_qw", 1.0);
-  declare_parameter("use_odom", false);
   declare_parameter("use_imu", false);
   declare_parameter("enable_debug", false);
   declare_parameter("enable_debug_topic", false);
   declare_parameter("ndt_num_threads", 0);
-
-  // 速度入力（段階3）
-  declare_parameter("ros2_mode", "Real");
-  declare_parameter("odom_topic", "/wheelchair/odom");
 
   // 点群の時刻の出どころ："receipt"（この PC の受信時刻）or "message"（ヘッダ stamp）
   declare_parameter("scan_time_source", "receipt");
@@ -47,8 +42,12 @@ PCLLocalization::PCLLocalization(const rclcpp::NodeOptions & options)
   // RViz 専用 TF（/tf_rviz）を点群ヘッダの時刻で配信するか
   declare_parameter("publish_rviz_tf", true);
 
-  // EKF（src/ekf/config/ekf.yaml）
-  pcl_localization::declareEkfParameters(*this);
+  // EKF（ekf_localizer）との連携
+  declare_parameter("publish_tf", true);
+  declare_parameter("use_tf_init_guess", false);
+  declare_parameter("tf_init_guess_timeout", 0.05);
+  declare_parameter("use_fitness_reject", false);
+  declare_parameter("fitness_reject_threshold", 1.0);
 }
 
 using CallbackReturn = rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn;
@@ -60,7 +59,7 @@ CallbackReturn PCLLocalization::on_configure(const rclcpp_lifecycle::State &)
   initializeParameters();
   initializePubSub();
   initializeRegistration();
-  publishLidarStaticTf();
+  has_mount_ = false;
 
   path_ptr_ = std::make_shared<nav_msgs::msg::Path>();
   path_ptr_->header.frame_id = global_frame_id_;
@@ -78,7 +77,7 @@ CallbackReturn PCLLocalization::on_activate(const rclcpp_lifecycle::State &)
   initial_map_pub_->on_activate();
   debug_pub_->on_activate();
   rviz_tf_pub_->on_activate();
-  ekf_pose_pub_->on_activate();
+  ndt_pose_pub_->on_activate();
 
   if (set_initial_pose_) {
     auto msg = std::make_shared<geometry_msgs::msg::PoseWithCovarianceStamped>();
@@ -138,7 +137,7 @@ CallbackReturn PCLLocalization::on_deactivate(const rclcpp_lifecycle::State &)
   initial_map_pub_->on_deactivate();
   debug_pub_->on_deactivate();
   rviz_tf_pub_->on_deactivate();
-  ekf_pose_pub_->on_deactivate();
+  ndt_pose_pub_->on_deactivate();
 
   RCLCPP_INFO(get_logger(), "Deactivating end");
   return CallbackReturn::SUCCESS;
@@ -153,8 +152,7 @@ CallbackReturn PCLLocalization::on_cleanup(const rclcpp_lifecycle::State &)
   pose_pub_.reset();
   debug_pub_.reset();
   rviz_tf_pub_.reset();
-  ekf_pose_pub_.reset();
-  odom_sub_.reset();
+  ndt_pose_pub_.reset();
   cloud_sub_.reset();
   imu_sub_.reset();
 
@@ -202,13 +200,14 @@ void PCLLocalization::initializeParameters()
   get_parameter("initial_pose_qy", initial_pose_qy_);
   get_parameter("initial_pose_qz", initial_pose_qz_);
   get_parameter("initial_pose_qw", initial_pose_qw_);
-  get_parameter("use_odom", use_odom_);
   get_parameter("use_imu", use_imu_);
   get_parameter("enable_debug", enable_debug_);
   get_parameter("enable_debug_topic", enable_debug_topic_);
-  get_parameter("ros2_mode", ros2_mode_);
-  get_parameter("odom_topic", odom_topic_);
-  ekf_cfg_ = pcl_localization::loadEkfConfig(*this);
+  get_parameter("publish_tf", publish_tf_);
+  get_parameter("use_tf_init_guess", use_tf_init_guess_);
+  get_parameter("tf_init_guess_timeout", tf_init_guess_timeout_);
+  get_parameter("use_fitness_reject", use_fitness_reject_);
+  get_parameter("fitness_reject_threshold", fitness_reject_threshold_);
   get_parameter("pose_output_frame", pose_output_frame_);
   get_parameter("publish_rviz_tf", publish_rviz_tf_);
   if (pose_output_frame_ != "base_link" && pose_output_frame_ != "lidar") {
@@ -223,12 +222,6 @@ void PCLLocalization::initializeParameters()
       get_logger(), "Unknown scan_time_source \"%s\". Falling back to \"receipt\".",
       scan_time_source_.c_str());
     scan_time_source_ = "receipt";
-  }
-
-  if (ros2_mode_ != "Gazebo" && ros2_mode_ != "Real") {
-    RCLCPP_WARN(
-      get_logger(), "Unknown ros2_mode \"%s\". Falling back to \"Real\".", ros2_mode_.c_str());
-    ros2_mode_ = "Real";
   }
 
   RCLCPP_INFO(get_logger(),"global_frame_id: %s", global_frame_id_.c_str());
@@ -246,74 +239,40 @@ void PCLLocalization::initializeParameters()
   RCLCPP_INFO(get_logger(),"use_pcd_map: %d", use_pcd_map_);
   RCLCPP_INFO(get_logger(),"map_path: %s", map_path_.c_str());
   RCLCPP_INFO(get_logger(),"set_initial_pose: %d", set_initial_pose_);
-  RCLCPP_INFO(get_logger(),"use_odom: %d", use_odom_);
   RCLCPP_INFO(get_logger(),"use_imu: %d", use_imu_);
   RCLCPP_INFO(get_logger(),"enable_debug: %d", enable_debug_);
   RCLCPP_INFO(get_logger(),"enable_debug_topic: %d", enable_debug_topic_);
-  RCLCPP_INFO(get_logger(),"ros2_mode: %s", ros2_mode_.c_str());
-  RCLCPP_INFO(get_logger(),"odom_topic: %s", odom_topic_.c_str());
-  RCLCPP_INFO(get_logger(),"use_ekf: %d", ekf_cfg_.use_ekf);
-  RCLCPP_INFO(get_logger(),"use_ekf_init_guess: %d", ekf_cfg_.use_init_guess);
-  RCLCPP_INFO(get_logger(),"use_ekf_for_pose_output: %d", ekf_cfg_.use_for_pose_output);
-  RCLCPP_INFO(get_logger(),"ekf_model: %s", ekf_cfg_.model.c_str());
-  RCLCPP_INFO(get_logger(),"time_source: %s", ekf_cfg_.time_source.c_str());
+  RCLCPP_INFO(get_logger(),"publish_tf: %d", publish_tf_);
+  RCLCPP_INFO(get_logger(),"use_tf_init_guess: %d (timeout %lf s)", use_tf_init_guess_, tf_init_guess_timeout_);
+  RCLCPP_INFO(get_logger(),"use_fitness_reject: %d (threshold %lf)", use_fitness_reject_, fitness_reject_threshold_);
   RCLCPP_INFO(get_logger(),"scan_time_source: %s", scan_time_source_.c_str());
   RCLCPP_INFO(get_logger(),"pose_output_frame: %s", pose_output_frame_.c_str());
   RCLCPP_INFO(get_logger(),"publish_rviz_tf: %d", publish_rviz_tf_);
 
-  initializeEkf();
 }
 
-void PCLLocalization::initializeEkf()
+bool PCLLocalization::lookupMount(const std::string & lidar_frame, Eigen::Affine3d & T_bl)
 {
-  pcl_localization::logEkfConfig(get_logger(), ekf_cfg_);
-  ekf_ = pcl_localization::createEkf(ekf_cfg_);
-  odom_ekf_ = dynamic_cast<pcl_localization::VehicleOdomEkf *>(ekf_.get());
-  if (odom_ekf_ && !use_odom_) {
-    RCLCPP_WARN(
-      get_logger(), "ekf_model is \"ndt_odom\" but use_odom is false: odometry is ignored, "
-      "so the EKF behaves as \"ndt_only\".");
+  if (!has_mount_) {
+    try {
+      const geometry_msgs::msg::TransformStamped tf =
+        tfbuffer_.lookupTransform(base_frame_id_, lidar_frame, tf2::TimePointZero);
+      mount_ = tf2::transformToEigen(tf);
+      has_mount_ = true;
+      RCLCPP_INFO(
+        get_logger(), "mount %s -> %s (from TF): t=[%.3f, %.3f, %.3f]",
+        base_frame_id_.c_str(), lidar_frame.c_str(),
+        mount_.translation().x(), mount_.translation().y(), mount_.translation().z());
+    } catch (const tf2::TransformException & ex) {
+      RCLCPP_WARN_THROTTLE(
+        get_logger(), *get_clock(), 5000,
+        "No TF %s -> %s (%s). TF, path and base-frame pose are not published.",
+        base_frame_id_.c_str(), lidar_frame.c_str(), ex.what());
+      return false;
+    }
   }
-}
-
-bool PCLLocalization::ekfInitialized() const
-{
-  return ekf_->initialized();
-}
-
-void PCLLocalization::ekfPredictTo(double t)
-{
-  ekf_->predictTo(t);
-}
-
-void PCLLocalization::ekfReset()
-{
-  ekf_->reset();
-}
-
-Eigen::Affine3d PCLLocalization::ekfLidarPose() const
-{
-  return ekf_->lidarPose();
-}
-
-void PCLLocalization::publishLidarStaticTf()
-{
-  // 出力は本当の base_link なので、取付の実値（lidar_offset / lidar_rotation）を配信する
-  const Eigen::Affine3d T = ekf_->mountTransform();
-
-  geometry_msgs::msg::TransformStamped tf_msg = tf2::eigenToTransform(T);
-  tf_msg.header.stamp = now();
-  tf_msg.header.frame_id = base_frame_id_;
-  tf_msg.child_frame_id = ekf_cfg_.lidar_frame_id;
-  if (!static_broadcaster_) {
-    static_broadcaster_ = std::make_shared<tf2_ros::StaticTransformBroadcaster>(this);
-  }
-  static_broadcaster_->sendTransform(tf_msg);
-
-  RCLCPP_INFO(
-    get_logger(), "static TF %s -> %s: t=[%.3f, %.3f, %.3f]",
-    base_frame_id_.c_str(), ekf_cfg_.lidar_frame_id.c_str(),
-    T.translation().x(), T.translation().y(), T.translation().z());
+  T_bl = mount_;
+  return true;
 }
 
 void PCLLocalization::initializePubSub()
@@ -340,9 +299,9 @@ void PCLLocalization::initializePubSub()
     "localization_debug",
     rclcpp::QoS(rclcpp::KeepLast(1)).transient_local().reliable());
 
-  ekf_pose_pub_ = create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>(
-    "ekf_pose",
-    rclcpp::QoS(rclcpp::KeepLast(1)).transient_local().reliable());
+  // EKF が 1 つも落とさないよう reliable・深さ 10
+  ndt_pose_pub_ = create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>(
+    "ndt_pose", rclcpp::QoS(rclcpp::KeepLast(10)).reliable());
 
   initial_pose_sub_ = create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>(
     "initialpose", rclcpp::SystemDefaultsQoS(),
@@ -351,19 +310,6 @@ void PCLLocalization::initializePubSub()
   map_sub_ = create_subscription<sensor_msgs::msg::PointCloud2>(
     "map", rclcpp::QoS(rclcpp::KeepLast(1)).transient_local().reliable(),
     std::bind(&PCLLocalization::mapReceived, this, std::placeholders::_1));
-
-  // 速度入力の購読先。どのモードでも updateVelocity() に v, omega を渡す点は同じ
-  if (ros2_mode_ == "Gazebo") {
-    odom_sub_ = create_subscription<nav_msgs::msg::Odometry>(
-      "odom", rclcpp::SensorDataQoS(),
-      std::bind(&PCLLocalization::odomReceived, this, std::placeholders::_1));
-  } else {
-    // whill_odometry が配信する /wheelchair/odom（RELIABLE, 約 20 Hz）。
-    // twist は child_frame_id = base_link 座標なので linear.x, angular.z がそのまま v, omega
-    odom_sub_ = create_subscription<nav_msgs::msg::Odometry>(
-      odom_topic_, rclcpp::QoS(rclcpp::KeepLast(1)),
-      std::bind(&PCLLocalization::odomReceived, this, std::placeholders::_1));
-  }
 
   // KeepLast(1)：キューが飽和して古いスキャンを処理するのを避ける。
   // SensorDataQoS は best effort なので、深さだけ変えると publisher と接続できなくなる。
@@ -434,8 +380,9 @@ void PCLLocalization::initialPoseReceived(const geometry_msgs::msg::PoseWithCova
   }
   initialpose_recieved_ = true;
   corrent_pose_with_cov_stamped_ptr_ = msg;
-  // 姿勢を与え直したので EKF は次の NDT 観測で初期化し直す（ゲートに引っかかり続けるのを防ぐ）
-  ekfReset();
+  // EKF も initialpose でリセットされ、次の NDT 観測で初期化し直す。それまでの TF は古い姿勢なので、
+  // しばらくは初期値に使わない（与えた姿勢・NDT の前回の解を使う）
+  tf_init_guess_resume_time_ = now() + rclcpp::Duration::from_seconds(1.0);
   pose_pub_->publish(*corrent_pose_with_cov_stamped_ptr_);
 
   cloudReceived(last_scan_ptr_);
@@ -466,60 +413,6 @@ void PCLLocalization::mapReceived(const sensor_msgs::msg::PointCloud2::SharedPtr
 
   map_recieved_ = true;
   RCLCPP_INFO(get_logger(), "mapReceived end");
-}
-
-void PCLLocalization::odomReceived(const nav_msgs::msg::Odometry::ConstSharedPtr msg)
-{
-  if (!use_odom_) {return;}
-  // twist.covariance は 6x6 行優先。[0] が v_x、[35] が omega_z の分散
-  const Eigen::Vector2d r_msg(msg->twist.covariance[0], msg->twist.covariance[35]);
-  updateVelocity(
-    msg->twist.twist.linear.x,
-    msg->twist.twist.angular.z,
-    r_msg,
-    rclcpp::Time(msg->header.stamp));
-}
-
-double PCLLocalization::ekfTime(const rclcpp::Time & stamp)
-{
-  // "wall"：EKF の時刻基準を壁時計に一本化する。スキャン時刻（過去）と
-  //         オドメトリ時刻の混在で dt < 0 が出るのを避けるため。
-  //         代償は観測遅延ぶんのバイアス（docs/ekf_design.md 6.5 節）。
-  // "stamp"：メッセージ時刻を使う。rosbag 再生時はこちら。
-  return (ekf_cfg_.time_source == "wall") ? now().seconds() : stamp.seconds();
-}
-
-void PCLLocalization::updateVelocity(
-  double v, double omega, const Eigen::Vector2d & r_msg, const rclcpp::Time & stamp)
-{
-  if (!ekf_cfg_.use_ekf) {return;}
-  const double t = ekfTime(stamp);
-
-  if (!odom_ekf_) {
-    // ndt_only：オドメトリの値は使わず、予測を進めて配信する時刻のきっかけにだけ使う
-    ekfPredictTo(t);
-    publishEkfPose();
-    return;
-  }
-
-  // ndt_odom：v, omega を観測として取り込む（未初期化でも値は記録され、初期化に使われる）
-  Eigen::Vector2d r = ekf_cfg_.odom_params.r_odom;
-  if (ekf_cfg_.odom_covariance_source == "message") {
-    if (r_msg.allFinite() && (r_msg.array() > 0.0).all()) {
-      r = r_msg;
-    } else {
-      RCLCPP_WARN_ONCE(
-        get_logger(), "Odometry twist covariance is not positive ([0]=%g, [35]=%g). Using R_odom.",
-        r_msg(0), r_msg(1));
-    }
-  }
-  const bool was_initialized = ekfInitialized();
-  if (!odom_ekf_->updateOdom(v, omega, r, t) && was_initialized) {
-    RCLCPP_WARN(
-      get_logger(), "Odometry v=%.3f omega=%.3f rejected by gate (d2 = %lf, %d times in a row).",
-      v, omega, odom_ekf_->lastOdomMahalanobis(), odom_ekf_->odomRejectCount());
-  }
-  publishEkfPose();
 }
 
 void PCLLocalization::imuReceived(const sensor_msgs::msg::Imu::ConstSharedPtr msg)
@@ -573,7 +466,7 @@ void PCLLocalization::cloudReceived(const sensor_msgs::msg::PointCloud2::ConstSh
 
   // ---- 時刻 ----
   // 点群の stamp は別 PC（時刻同期なし）の時計なので、既定ではこの PC の受信時刻を使う。
-  // scan_time は出力（pcl_pose / TF / path / ekf_pose）の stamp と EKF の観測時刻に使う。
+  // scan_time は出力（pcl_pose / TF / path / ndt_pose）の stamp に使う（ndt_pose は EKF の観測時刻）。
   const rclcpp::Time t_receipt = now();
   const rclcpp::Time scan_time =
     (scan_time_source_ == "receipt") ? t_receipt : rclcpp::Time(msg->header.stamp, RCL_ROS_TIME);
@@ -609,17 +502,24 @@ void PCLLocalization::cloudReceived(const sensor_msgs::msg::PointCloud2::ConstSh
   pcl::PointCloud<pcl::PointXYZI>::Ptr tmp_ptr(new pcl::PointCloud<pcl::PointXYZI>(tmp));
   registration_->setInputSource(tmp_ptr);
 
-  // EKF の時刻基準。align の前に 1 回だけ読み、update まで同じ値を使う
-  // （2 回目の predictTo は dt = 0 となりスキップされる＝二重計上しない）。
-  // "wall" ではコールバック開始時の now()、"stamp" では scan_time（どちらもこの PC の時計）
-  const double t_ekf = (ekf_cfg_.time_source == "wall") ? t_receipt.seconds() : scan_time.seconds();
-
   Eigen::Matrix4f init_guess;
-  if (ekf_cfg_.use_ekf && ekf_cfg_.use_init_guess && ekfInitialized()) {
-    // 閉ループ：EKF をスキャン時刻まで予測し、推定した LiDAR 姿勢を初期値にする
-    ekfPredictTo(t_ekf);
-    init_guess = ekfLidarPose().matrix().cast<float>();
-  } else {
+  bool init_guess_from_tf = false;
+  if (use_tf_init_guess_ && scan_time > tf_init_guess_resume_time_) {
+    // 閉ループ：EKF が配信する TF（map → base → LiDAR）を点群の取得時刻で引いて初期値にする。
+    // 取得時刻は過去なので、TF は補間で求まる（EKF が届くまでの待ちは tf_init_guess_timeout まで）
+    try {
+      const geometry_msgs::msg::TransformStamped tf = tfbuffer_.lookupTransform(
+        global_frame_id_, msg->header.frame_id, scan_time,
+        rclcpp::Duration::from_seconds(tf_init_guess_timeout_));
+      init_guess = tf2::transformToEigen(tf).matrix().cast<float>();
+      init_guess_from_tf = true;
+    } catch (const tf2::TransformException & ex) {
+      RCLCPP_WARN_THROTTLE(
+        get_logger(), *get_clock(), 5000, "No TF for init_guess (%s). Using the last pose.",
+        ex.what());
+    }
+  }
+  if (!init_guess_from_tf) {
     Eigen::Affine3d affine;
     tf2::fromMsg(corrent_pose_with_cov_stamped_ptr_->pose.pose, affine);
     init_guess = affine.matrix().cast<float>();
@@ -656,80 +556,32 @@ void PCLLocalization::cloudReceived(const sensor_msgs::msg::PointCloud2::ConstSh
 
   last_scan_ptr_ = msg;
 
-  // ---- EKF：NDT の解を観測として取り込む（配信より前に行う）----
-  // fitness による全体拒否：NDT 自体が破綻しているとみなし、どの系も更新しない
-  const bool fitness_rejected =
-    ekf_cfg_.use_fitness_reject && fitness_score > ekf_cfg_.fitness_reject_threshold;
-  if (ekf_cfg_.use_ekf && fitness_rejected) {
+  // ---- EKF へ：NDT の解（map → LiDAR、stamp は点群の取得時刻）を配信する ----
+  // fitness による全体拒否：NDT 自体が破綻しているとみなし、EKF に渡さない
+  if (use_fitness_reject_ && fitness_score > fitness_reject_threshold_) {
     RCLCPP_WARN(
-      get_logger(), "NDT result rejected by fitness (%lf > %lf). EKF not updated.",
-      fitness_score, ekf_cfg_.fitness_reject_threshold);
-  }
-  if (ekf_cfg_.use_ekf && !fitness_rejected) {
-    // NDT の出力は map -> LiDAR の姿勢
-    tf2::Quaternion tf_quat;
-    tf2::fromMsg(quat_msg, tf_quat);
-    double ndt_roll, ndt_pitch, ndt_yaw;
-    tf2::Matrix3x3(tf_quat).getRPY(ndt_roll, ndt_pitch, ndt_yaw);
-
-    pcl_localization::VehicleEkf::Vector6d z;
-    z << static_cast<double>(final_transformation(0, 3)),
-      static_cast<double>(final_transformation(1, 3)),
-      static_cast<double>(final_transformation(2, 3)),
-      ndt_roll, ndt_pitch, ndt_yaw;
-
-    if (!ekf_->initialized()) {
-      ekf_->initialize(z, t_ekf);
-      if (odom_ekf_) {
-        RCLCPP_INFO(
-          get_logger(), "EKF initialized (v, omega from %s: %.3f, %.3f).",
-          odom_ekf_->initializedFromOdom() ? "odometry" : "zero",
-          ekf_->velocity(), ekf_->angularVelocity());
-      }
-    } else {
-      ekf_->predictTo(t_ekf);
-      const auto r = ekf_->update(z);
-      using R1 = pcl_localization::VehicleEkf::ScalarResult;
-      if (!r.horizontal_accepted) {
-        RCLCPP_WARN(
-          get_logger(), "NDT x/y/yaw rejected by gate (d2 = %lf, %d times in a row).",
-          ekf_->lastHorizontalMahalanobis(), ekf_->horizontalRejectCount());
-      }
-      // obs は NDT が出した LiDAR の値（再初期化ではこの値に合わせる）
-      const auto report = [this](const char * name, R1 res,
-          const pcl_localization::VehicleEkf::ScalarGate & gate, double obs) {
-          if (res == R1::kRejected) {
-            RCLCPP_WARN(
-              get_logger(), "NDT %s rejected by gate (d2 = %lf, %d times in a row).",
-              name, gate.last_d2, gate.reject_count);
-          } else if (res == R1::kReinitialized) {
-            RCLCPP_WARN(
-              get_logger(), "NDT %s: lockout -> reinitialized to LiDAR %s = %lf.", name, name, obs);
-          }
-        };
-      report("z", r.z, ekf_->zGate(), z(2));
-      report("roll", r.roll, ekf_->rollGate(), z(3));
-      report("pitch", r.pitch, ekf_->pitchGate(), z(4));
-    }
-    publishEkfPose();
-  }
-
-  // ---- 出力する姿勢を選ぶ（use_ekf_for_pose_output）----
-  // 既定は NDT の生の解。true なら pcl_pose / TF / path をまとめて EKF の推定値にする。
-  geometry_msgs::msg::PoseWithCovarianceStamped output_pose = *corrent_pose_with_cov_stamped_ptr_;
-  if (ekf_cfg_.use_ekf && ekf_cfg_.use_for_pose_output && ekfInitialized()) {
-    fillEkfPose(output_pose);
+      get_logger(), "NDT result rejected by fitness (%lf > %lf). /ndt_pose not published.",
+      fitness_score, fitness_reject_threshold_);
   } else {
-    // 静的 TF が取付の実値なので、NDT の生の解（LiDAR 姿勢）も base_link に直して出す
+    ndt_pose_pub_->publish(*corrent_pose_with_cov_stamped_ptr_);
+  }
+
+  // ---- 出力（NDT の解）----
+  // /pcl_pose は pose_output_frame で LiDAR 中心にできる。TF と /path は常に base_frame_id
+  geometry_msgs::msg::PoseWithCovarianceStamped output_pose = *corrent_pose_with_cov_stamped_ptr_;
+  if (pose_output_frame_ == "lidar") {
+    pose_pub_->publish(output_pose);
+  }
+  // NDT の解（LiDAR 姿勢）を静的 TF の取付で base_frame_id に直す
+  Eigen::Affine3d T_bl;
+  const bool has_base_pose = lookupMount(msg->header.frame_id, T_bl);
+  if (has_base_pose) {
     Eigen::Affine3d T_ml;
     tf2::fromMsg(output_pose.pose.pose, T_ml);
-    output_pose.pose.pose = tf2::toMsg(T_ml * ekf_->mountTransform().inverse());
-  }
-  // TF と /path は常に base_link。/pcl_pose だけ pose_output_frame で LiDAR 中心にできる
-  if (pose_output_frame_ == "lidar") {
-    pose_pub_->publish(toLidarPose(output_pose));
-  } else {
-    pose_pub_->publish(output_pose);
+    output_pose.pose.pose = tf2::toMsg(T_ml * T_bl.inverse());
+    if (pose_output_frame_ != "lidar") {
+      pose_pub_->publish(output_pose);
+    }
   }
 
   geometry_msgs::msg::TransformStamped transform_stamped;
@@ -740,12 +592,14 @@ void PCLLocalization::cloudReceived(const sensor_msgs::msg::PointCloud2::ConstSh
   transform_stamped.transform.translation.y = output_pose.pose.pose.position.y;
   transform_stamped.transform.translation.z = output_pose.pose.pose.position.z;
   transform_stamped.transform.rotation = output_pose.pose.pose.orientation;
-  broadcaster_.sendTransform(transform_stamped);
+  if (has_base_pose && publish_tf_) {
+    broadcaster_.sendTransform(transform_stamped);
+  }
 
   // RViz 用：同じ姿勢を点群ヘッダの時刻で /tf_rviz に配信する。点群の stamp は別 PC の時計で、
   // /tf（この PC の時刻）では RViz が /velodyne_points の変換を引けないため。
   // /tf と混ぜると時刻が 323 日ずれたデータが同じバッファに入るので、別トピックにしている
-  if (publish_rviz_tf_ && rviz_tf_pub_->is_activated()) {
+  if (has_base_pose && publish_rviz_tf_ && rviz_tf_pub_->is_activated()) {
     tf2_msgs::msg::TFMessage rviz_tf;
     rviz_tf.transforms.push_back(transform_stamped);
     rviz_tf.transforms.back().header.stamp = msg->header.stamp;
@@ -756,8 +610,10 @@ void PCLLocalization::cloudReceived(const sensor_msgs::msg::PointCloud2::ConstSh
   pose_stamped_ptr->header.stamp = scan_time;
   pose_stamped_ptr->header.frame_id = global_frame_id_;
   pose_stamped_ptr->pose = output_pose.pose.pose;
-  path_ptr_->poses.push_back(*pose_stamped_ptr);
-  path_pub_->publish(*path_ptr_);
+  if (has_base_pose) {
+    path_ptr_->poses.push_back(*pose_stamped_ptr);
+    path_pub_->publish(*path_ptr_);
+  }
 
   if (enable_debug_ || enable_debug_topic_) {
     /* delta_angle check
@@ -796,62 +652,4 @@ void PCLLocalization::cloudReceived(const sensor_msgs::msg::PointCloud2::ConstSh
       debug_pub_->publish(debug_msg);
     }
   }
-}
-
-void PCLLocalization::publishEkfPose()
-{
-  if (!ekf_cfg_.use_ekf || !ekfInitialized()) {return;}
-  if (!ekf_pose_pub_ || !ekf_pose_pub_->is_activated()) {return;}
-
-  geometry_msgs::msg::PoseWithCovarianceStamped ekf_msg;
-  // stamp は状態が表している時刻（EKF の t_last）。メッセージの stamp を使うと、
-  // align 中に届いて後から処理されたオドメトリが古い stamp で出て、配信順と stamp が逆転する
-  ekf_msg.header.stamp = rclcpp::Time(
-    static_cast<int64_t>(std::llround(ekf_->lastStamp() * 1e9)), RCL_ROS_TIME);
-  ekf_msg.header.frame_id = global_frame_id_;
-  fillEkfPose(ekf_msg);
-
-  // /ekf_pose は map → LiDAR（NDT と同じ基準）にして配信する。map → base_link は toLidarPose() が
-  // 静的 TF と同じ取付値（mountTransform）で変換するので、TF の map → base_link → velodyne と一致する
-  ekf_pose_pub_->publish(toLidarPose(ekf_msg));
-}
-
-void PCLLocalization::fillEkfPose(geometry_msgs::msg::PoseWithCovarianceStamped & out) const
-{
-  // map → base_link（状態そのもの）
-  out.pose.pose = tf2::toMsg(ekf_->basePose());
-
-  // 共分散：状態の先頭 6 成分 [x, y, z, roll, pitch, yaw] は ROS の covariance と同じ並び
-  const auto P6 = ekf_->covariance().topLeftCorner<6, 6>();
-  Eigen::Map<Eigen::Matrix<double, 6, 6, Eigen::RowMajor>>(out.pose.covariance.data()) = P6;
-}
-
-geometry_msgs::msg::PoseWithCovarianceStamped PCLLocalization::toLidarPose(
-  const geometry_msgs::msg::PoseWithCovarianceStamped & base) const
-{
-  // map → LiDAR = (map → base_link) · (base_link → LiDAR)。静的 TF と同じ取付値を使うので
-  // TF の map → base_link → velodyne と厳密に一致する
-  geometry_msgs::msg::PoseWithCovarianceStamped out = base;
-  Eigen::Affine3d T_mb;
-  tf2::fromMsg(base.pose.pose, T_mb);
-  out.pose.pose = tf2::toMsg(T_mb * ekf_->mountTransform());
-
-  // 共分散：EKF の観測モデル h（base 姿勢 → LiDAR 姿勢）のヤコビアン J で J C J^T と伝播する。
-  // 取付オフセットのレバーアームで roll・pitch・yaw の不確かさが位置に漏れる分が入る
-  const Eigen::Vector3d rpy = [&]() {
-      double roll, pitch, yaw;
-      tf2::Matrix3x3(
-        tf2::Quaternion(
-          base.pose.pose.orientation.x, base.pose.pose.orientation.y,
-          base.pose.pose.orientation.z, base.pose.pose.orientation.w)).getRPY(roll, pitch, yaw);
-      return Eigen::Vector3d(roll, pitch, yaw);
-    }();
-  pcl_localization::VehicleEkf::Vector8d x = pcl_localization::VehicleEkf::Vector8d::Zero();
-  x.head<3>() = T_mb.translation();
-  x.segment<3>(3) = rpy;
-  const Eigen::Matrix<double, 6, 6> J = ekf_->observationJacobian(x).leftCols<6>();
-  const Eigen::Map<const Eigen::Matrix<double, 6, 6, Eigen::RowMajor>> C(base.pose.covariance.data());
-  Eigen::Map<Eigen::Matrix<double, 6, 6, Eigen::RowMajor>> C_out(out.pose.covariance.data());
-  C_out = J * C * J.transpose();
-  return out;
 }

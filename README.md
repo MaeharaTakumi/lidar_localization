@@ -15,12 +15,15 @@ Green: path, Red: map
 /cloud  (sensor_msgs/PointCloud2)  
 /map  (sensor_msgs/PointCloud2)  
 /initialpose (geometry_msgs/PoseStamed)(when `set_initial_pose` is false)  
-/odom (nav_msgs/Odometry)(optional)   
 /imu  (sensor_msgs/Imu)(optional)  
+TF map -> base_link at the scan time (when `use_tf_init_guess` is true, e.g. from [ekf_localizer](https://github.com/MaeharaTakumi/ekf_localizer))  
+TF base_link -> LiDAR (static, used to convert the NDT result to base_link)  
 
 - output  
 /pcl_pose (geometry_msgs/PoseStamped)  
+/ndt_pose (geometry_msgs/PoseWithCovarianceStamped)(map -> LiDAR, stamped with the scan time; input of ekf_localizer)  
 /path (nav_msgs/Path)  
+TF map -> base_link (when `publish_tf` is true)  
 /initial_map (sensor_msgs/PointCloud2)(when `use_pcd_map` is true)  
 
 ## params
@@ -47,9 +50,16 @@ Green: path, Red: map
 |initial_pose_qy|double|0.0|Quaternion y of the initial pose value|
 |initial_pose_qz|double|0.0|Quaternion z of the initial pose value|
 |initial_pose_qw|double|1.0|Quaternion w of the initial pose value|
-|use_odom|bool|false|whether odom is used or not for initial attitude in point cloud registration|
 |use_imu|bool|false|whether 9-axis imu is used or not for point cloud distortion correction|
 |enable_debug|bool|false|whether debug is done or not|
+|publish_tf|bool|true|whether to publish TF map -> base_link (set false when ekf_localizer publishes it)|
+|use_tf_init_guess|bool|false|whether to take the initial guess from TF map -> LiDAR at the scan time|
+|tf_init_guess_timeout|double|0.05|time to wait for the TF above[sec]|
+|use_fitness_reject|bool|false|whether to drop results whose fitness score exceeds `fitness_reject_threshold` from /ndt_pose|
+|fitness_reject_threshold|double|1.0|threshold for `use_fitness_reject`|
+
+`cloud_stamp_corrector` restamps point clouds from a PC whose clock is not synchronized
+(see [localization_bringup](https://github.com/MaeharaTakumi/localization_bringup)).
 
 ## demo
 
