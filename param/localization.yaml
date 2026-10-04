@@ -20,12 +20,12 @@
       # initial_pose_y: 27.0
       # initial_pose_z: 13.0
 
-      initial_pose_x: 0.0
-      initial_pose_y: 0.0
-      initial_pose_z: 0.0
+      initial_pose_x: 80.0
+      initial_pose_y: 7.0
+      initial_pose_z: 13.0
       initial_pose_qx: 0.0
       initial_pose_qy: 0.0
-      initial_pose_qz: 0.0
+      initial_pose_qz: 3.14
       initial_pose_qw: 1.0
       use_imu: false
       enable_debug: false
