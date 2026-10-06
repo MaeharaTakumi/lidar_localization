@@ -170,6 +170,16 @@ Visualization Manager:
         Reliability Policy: Reliable
         Value: /ekf/pose
       Value: true
+    - Class: rviz_default_plugins/Marker
+      Enabled: true
+      Name: NDTTime
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /ndt_time_marker
+      Value: true
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48
@@ -215,26 +225,15 @@ Visualization Manager:
   Value: true
   Views:
     Current:
-      Class: rviz_default_plugins/Orbit
-      Distance: 24.486188888549805
-      Enable Stereo Rendering:
-        Stereo Eye Separation: 0.05999999865889549
-        Stereo Focal Distance: 1
-        Swap Stereo Eyes: false
-        Value: false
-      Focal Point:
-        X: 4.130314826965332
-        Y: 1.0976428985595703
-        Z: 1.0240743160247803
-      Focal Shape Fixed Size: true
-      Focal Shape Size: 0.05000000074505806
+      Class: rviz_default_plugins/TopDownOrtho
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 1.5597963333129883
-      Target Frame: <Fixed Frame>
-      Value: Orbit (rviz)
-      Yaw: 1.605401635169983
+      Scale: 20
+      Target Frame: base_footprint
+      Value: TopDownOrtho (rviz_default_plugins)
+      X: 0
+      Y: 0
     Saved: ~
 Window Geometry:
   Displays:
