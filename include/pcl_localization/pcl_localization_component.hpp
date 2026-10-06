@@ -1,5 +1,4 @@
 #include <chrono>
-#include <cstdio>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -30,7 +29,6 @@
 #include "nav_msgs/msg/path.hpp"
 #include "std_msgs/msg/float32_multi_array.hpp"
 #include "tf2_msgs/msg/tf_message.hpp"
-#include "visualization_msgs/msg/marker.hpp"
 
 #include <pclomp/ndt_omp.h>
 #include <pclomp/ndt_omp_impl.hpp>
@@ -83,9 +81,6 @@ public:
     initial_map_pub_;
   rclcpp_lifecycle::LifecyclePublisher<std_msgs::msg::Float32MultiArray>::SharedPtr
     debug_pub_;
-  // NDT の計算時間を RViz に文字で出す Marker（車両の上に表示）
-  rclcpp_lifecycle::LifecyclePublisher<visualization_msgs::msg::Marker>::SharedPtr
-    ndt_time_pub_;
   // RViz 専用の TF（map -> base_link、stamp は点群ヘッダの時刻）。RViz は /tf をこれに remap する
   rclcpp_lifecycle::LifecyclePublisher<tf2_msgs::msg::TFMessage>::SharedPtr
     rviz_tf_pub_;

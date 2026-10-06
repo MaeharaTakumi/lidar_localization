@@ -76,7 +76,6 @@ CallbackReturn PCLLocalization::on_activate(const rclcpp_lifecycle::State &)
   path_pub_->on_activate();
   initial_map_pub_->on_activate();
   debug_pub_->on_activate();
-  ndt_time_pub_->on_activate();
   rviz_tf_pub_->on_activate();
   ndt_pose_pub_->on_activate();
 
@@ -137,7 +136,6 @@ CallbackReturn PCLLocalization::on_deactivate(const rclcpp_lifecycle::State &)
   path_pub_->on_deactivate();
   initial_map_pub_->on_deactivate();
   debug_pub_->on_deactivate();
-  ndt_time_pub_->on_deactivate();
   rviz_tf_pub_->on_deactivate();
   ndt_pose_pub_->on_deactivate();
 
@@ -153,7 +151,6 @@ CallbackReturn PCLLocalization::on_cleanup(const rclcpp_lifecycle::State &)
   path_pub_.reset();
   pose_pub_.reset();
   debug_pub_.reset();
-  ndt_time_pub_.reset();
   rviz_tf_pub_.reset();
   ndt_pose_pub_.reset();
   cloud_sub_.reset();
@@ -297,9 +294,6 @@ void PCLLocalization::initializePubSub()
   // QoS は tf2_ros::TransformListener の購読（KeepLast(100)・reliable）に合わせる
   rviz_tf_pub_ = create_publisher<tf2_msgs::msg::TFMessage>(
     "tf_rviz", rclcpp::QoS(rclcpp::KeepLast(100)).reliable());
-
-  ndt_time_pub_ = create_publisher<visualization_msgs::msg::Marker>(
-    "ndt_time_marker", rclcpp::QoS(rclcpp::KeepLast(1)));
 
   debug_pub_ = create_publisher<std_msgs::msg::Float32MultiArray>(
     "localization_debug",
@@ -561,27 +555,6 @@ void PCLLocalization::cloudReceived(const sensor_msgs::msg::PointCloud2::ConstSh
   corrent_pose_with_cov_stamped_ptr_->pose.pose.orientation = quat_msg;
 
   last_scan_ptr_ = msg;
-
-  // ---- NDT の計算時間を、NDT の解の上に文字で出す（RViz の Marker）----
-  if (ndt_time_pub_->is_activated()) {
-    visualization_msgs::msg::Marker marker;
-    marker.header.stamp = scan_time;
-    marker.header.frame_id = global_frame_id_;
-    marker.ns = "ndt_time";
-    marker.id = 0;
-    marker.type = visualization_msgs::msg::Marker::TEXT_VIEW_FACING;
-    marker.action = visualization_msgs::msg::Marker::ADD;
-    marker.pose = corrent_pose_with_cov_stamped_ptr_->pose.pose;
-    marker.pose.position.z += 3.0;
-    marker.scale.z = 1.0;
-    marker.color.r = marker.color.g = marker.color.b = marker.color.a = 1.0f;
-    char text[64];
-    std::snprintf(
-      text, sizeof(text), "NDT: %.1f ms",
-      (time_align_end.seconds() - time_align_start.seconds()) * 1000.0);
-    marker.text = text;
-    ndt_time_pub_->publish(marker);
-  }
 
   // ---- EKF へ：NDT の解（map → LiDAR、stamp は点群の取得時刻）を配信する ----
   // fitness による全体拒否：NDT 自体が破綻しているとみなし、EKF に渡さない

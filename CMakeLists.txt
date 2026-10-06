@@ -21,7 +21,6 @@ find_package(nav_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2_msgs REQUIRED)
-find_package(visualization_msgs REQUIRED)
 find_package(tf2_geometry_msgs  REQUIRED)
 find_package(tf2_sensor_msgs  REQUIRED)
 find_package(tf2_eigen REQUIRED)
@@ -52,7 +51,6 @@ ament_target_dependencies(pcl_localization_component
   nav_msgs
   std_msgs
   tf2_msgs
-  visualization_msgs
   pcl_conversions
   ndt_omp_ros2
 )
