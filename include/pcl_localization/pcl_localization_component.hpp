@@ -116,6 +116,7 @@ public:
   double ndt_step_size_;
   double transform_epsilon_;
   double voxel_leaf_size_;
+  double map_viz_leaf_size_;
   bool use_pcd_map_{false};
   std::string map_path_;
   bool set_initial_pose_{false};

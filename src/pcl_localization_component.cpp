@@ -15,6 +15,7 @@ PCLLocalization::PCLLocalization(const rclcpp::NodeOptions & options)
   declare_parameter("ndt_step_size", 0.1);
   declare_parameter("transform_epsilon", 0.01);
   declare_parameter("voxel_leaf_size", 0.2);
+  declare_parameter("map_viz_leaf_size", 0.2);
   declare_parameter("scan_max_range", 100.0);
   declare_parameter("scan_min_range", 1.0);
   declare_parameter("scan_period", 0.1);
@@ -106,8 +107,20 @@ CallbackReturn PCLLocalization::on_activate(const rclcpp_lifecycle::State &)
     pcl::io::loadPCDFile(map_path_, *map_cloud_ptr);
     RCLCPP_INFO(get_logger(), "Map Size %ld", map_cloud_ptr->size());
 
+    // RViz 表示用だけ間引く（NDT には間引かない地図をそのまま渡す）
+    pcl::PointCloud<pcl::PointXYZI>::Ptr viz_cloud_ptr = map_cloud_ptr;
+    if (map_viz_leaf_size_ > 0.0) {
+      viz_cloud_ptr.reset(new pcl::PointCloud<pcl::PointXYZI>);
+      pcl::VoxelGrid<pcl::PointXYZI> viz_filter;
+      viz_filter.setInputCloud(map_cloud_ptr);
+      viz_filter.setLeafSize(map_viz_leaf_size_, map_viz_leaf_size_, map_viz_leaf_size_);
+      viz_filter.filter(*viz_cloud_ptr);
+      RCLCPP_INFO(get_logger(), "Map for RViz: %ld -> %ld points (leaf %.2f m)",
+        map_cloud_ptr->size(), viz_cloud_ptr->size(), map_viz_leaf_size_);
+    }
+
     sensor_msgs::msg::PointCloud2::SharedPtr map_msg_ptr(new sensor_msgs::msg::PointCloud2);
-    pcl::toROSMsg(*map_cloud_ptr, *map_msg_ptr);
+    pcl::toROSMsg(*viz_cloud_ptr, *map_msg_ptr);
     map_msg_ptr->header.frame_id = global_frame_id_;
     initial_map_pub_->publish(*map_msg_ptr);
     RCLCPP_INFO(get_logger(), "Initial Map Published");
@@ -187,6 +200,7 @@ void PCLLocalization::initializeParameters()
   get_parameter("ndt_num_threads", ndt_num_threads_);
   get_parameter("transform_epsilon", transform_epsilon_);
   get_parameter("voxel_leaf_size", voxel_leaf_size_);
+  get_parameter("map_viz_leaf_size", map_viz_leaf_size_);
   get_parameter("scan_max_range", scan_max_range_);
   get_parameter("scan_min_range", scan_min_range_);
   get_parameter("scan_period", scan_period_);
@@ -233,6 +247,7 @@ void PCLLocalization::initializeParameters()
   RCLCPP_INFO(get_logger(),"ndt_num_threads: %d", ndt_num_threads_);
   RCLCPP_INFO(get_logger(),"transform_epsilon: %lf", transform_epsilon_);
   RCLCPP_INFO(get_logger(),"voxel_leaf_size: %lf", voxel_leaf_size_);
+  RCLCPP_INFO(get_logger(),"map_viz_leaf_size: %lf", map_viz_leaf_size_);
   RCLCPP_INFO(get_logger(),"scan_max_range: %lf", scan_max_range_);
   RCLCPP_INFO(get_logger(),"scan_min_range: %lf", scan_min_range_);
   RCLCPP_INFO(get_logger(),"scan_period: %lf", scan_period_);

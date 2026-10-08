@@ -58,3 +58,6 @@
       tf_init_guess_timeout: 0.05       # 上の TF を待つ時間 [s]
       use_fitness_reject: false         # fitness_score が閾値を超えた解を /ndt_pose に出さないか
       fitness_reject_threshold: 1.0     # 上の閾値
+
+      ## -- Rviz ---
+      map_viz_leaf_size: 0.2
