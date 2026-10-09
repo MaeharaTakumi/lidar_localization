@@ -39,7 +39,7 @@
       #   "receipt" : この PC で受信した時刻（now()）。出力と /ndt_pose の stamp に使う
       #   "message" : 点群ヘッダの stamp（時刻同期済み・Gazebo・cloud_stamp_corrector で直した点群）
       # localization_bringup から起動するときは "message"（同期していない環境は cloud_stamp_corrector が直す）
-      scan_time_source: "receipt"
+      scan_time_source: "message"
 
       # /pcl_pose (→/current_pose) の基準。TF（map -> base_link）と /path は常に base_link
       #   "base_link" : 車両中心
@@ -60,4 +60,4 @@
       fitness_reject_threshold: 1.0     # 上の閾値
 
       ## -- Rviz ---
-      map_viz_leaf_size: 0.2
+      map_viz_leaf_size: 0.1
