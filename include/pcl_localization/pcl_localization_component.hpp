@@ -87,9 +87,6 @@ public:
   // NDT の解（map → LiDAR、stamp は点群の取得時刻）。EKF（ekf_localizer）の観測
   rclcpp_lifecycle::LifecyclePublisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr
     ndt_pose_pub_;
-  // NDT の解で map 座標に直した点群（stamp は点群の取得時刻）。RViz で、その点群の NDT の解で表示する
-  rclcpp_lifecycle::LifecyclePublisher<sensor_msgs::msg::PointCloud2>::SharedPtr
-    aligned_cloud_pub_;
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::ConstSharedPtr
     map_sub_;
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::ConstSharedPtr
@@ -142,8 +139,6 @@ public:
   std::string scan_time_source_{"receipt"};
   std::string pose_output_frame_{"base_link"};
   bool publish_rviz_tf_{true};
-  // NDT の解で map 座標に直した点群（/aligned_points）を配信するか
-  bool publish_aligned_cloud_{true};
 
   // map → base_frame_id の TF を配信するか（EKF が配信するときは false）
   bool publish_tf_{true};
