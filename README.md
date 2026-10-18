@@ -23,6 +23,7 @@ TF base_link -> LiDAR (static, used to convert the NDT result to base_link)
 /pcl_pose (geometry_msgs/PoseStamped)  
 /ndt_pose (geometry_msgs/PoseWithCovarianceStamped)(map -> LiDAR, stamped with the scan time; input of ekf_localizer)  
 /path (nav_msgs/Path)  
+/aligned_points (sensor_msgs/PointCloud2)(the input cloud transformed to map with the NDT result of that cloud, stamped with the scan time; for RViz. Only when someone subscribes)  
 TF map -> base_link (when `publish_tf` is true)  
 /initial_map (sensor_msgs/PointCloud2)(when `use_pcd_map` is true)  
 
@@ -55,6 +56,7 @@ TF map -> base_link (when `publish_tf` is true)
 |publish_tf|bool|true|whether to publish TF map -> base_link (set false when ekf_localizer publishes it)|
 |use_tf_init_guess|bool|false|whether to take the initial guess from TF map -> LiDAR at the scan time|
 |tf_init_guess_timeout|double|0.05|time to wait for the TF above[sec]|
+|publish_aligned_cloud|bool|true|whether to publish /aligned_points (the cloud is transformed only while it has subscribers)|
 |use_fitness_reject|bool|false|whether to drop results whose fitness score exceeds `fitness_reject_threshold` from /ndt_pose|
 |fitness_reject_threshold|double|1.0|threshold for `use_fitness_reject`|
 
@@ -68,6 +70,10 @@ TF map -> base_link (when `publish_tf` is true)
 |auto_threshold|double|0.1|threshold for `auto` [sec]|
 
 The clock-offset estimation mode (`estimate`) was removed on 2026-10-15.
+
+RViz (`rviz/localization2.rviz`) shows `/aligned_points` ("Aligned points (NDT)"): each cloud placed with the NDT result of that cloud.
+`/velodyne_points` ("Points (EKF TF)", off by default) is transformed with TF map -> LiDAR at the cloud stamp, which is the EKF prediction
+(ekf_localizer with `publish_trigger: cloud`), not the NDT result.
 
 ## demo
 

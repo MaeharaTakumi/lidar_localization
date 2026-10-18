@@ -43,6 +43,9 @@ PCLLocalization::PCLLocalization(const rclcpp::NodeOptions & options)
   // RViz 専用 TF（/tf_rviz）を点群ヘッダの時刻で配信するか
   declare_parameter("publish_rviz_tf", true);
 
+  // NDT の解で map 座標に直した点群（/aligned_points）を配信するか（購読者がいるときだけ変換する）
+  declare_parameter("publish_aligned_cloud", true);
+
   // EKF（ekf_localizer）との連携
   declare_parameter("publish_tf", true);
   declare_parameter("use_tf_init_guess", false);
@@ -79,6 +82,7 @@ CallbackReturn PCLLocalization::on_activate(const rclcpp_lifecycle::State &)
   debug_pub_->on_activate();
   rviz_tf_pub_->on_activate();
   ndt_pose_pub_->on_activate();
+  aligned_cloud_pub_->on_activate();
 
   if (set_initial_pose_) {
     auto msg = std::make_shared<geometry_msgs::msg::PoseWithCovarianceStamped>();
@@ -151,6 +155,7 @@ CallbackReturn PCLLocalization::on_deactivate(const rclcpp_lifecycle::State &)
   debug_pub_->on_deactivate();
   rviz_tf_pub_->on_deactivate();
   ndt_pose_pub_->on_deactivate();
+  aligned_cloud_pub_->on_deactivate();
 
   RCLCPP_INFO(get_logger(), "Deactivating end");
   return CallbackReturn::SUCCESS;
@@ -166,6 +171,7 @@ CallbackReturn PCLLocalization::on_cleanup(const rclcpp_lifecycle::State &)
   debug_pub_.reset();
   rviz_tf_pub_.reset();
   ndt_pose_pub_.reset();
+  aligned_cloud_pub_.reset();
   cloud_sub_.reset();
   imu_sub_.reset();
 
@@ -224,6 +230,7 @@ void PCLLocalization::initializeParameters()
   get_parameter("fitness_reject_threshold", fitness_reject_threshold_);
   get_parameter("pose_output_frame", pose_output_frame_);
   get_parameter("publish_rviz_tf", publish_rviz_tf_);
+  get_parameter("publish_aligned_cloud", publish_aligned_cloud_);
   if (pose_output_frame_ != "base_link" && pose_output_frame_ != "lidar") {
     RCLCPP_WARN(
       get_logger(), "Unknown pose_output_frame \"%s\". Falling back to \"base_link\".",
@@ -263,6 +270,7 @@ void PCLLocalization::initializeParameters()
   RCLCPP_INFO(get_logger(),"scan_time_source: %s", scan_time_source_.c_str());
   RCLCPP_INFO(get_logger(),"pose_output_frame: %s", pose_output_frame_.c_str());
   RCLCPP_INFO(get_logger(),"publish_rviz_tf: %d", publish_rviz_tf_);
+  RCLCPP_INFO(get_logger(),"publish_aligned_cloud: %d", publish_aligned_cloud_);
 
 }
 
@@ -317,6 +325,10 @@ void PCLLocalization::initializePubSub()
   // EKF が 1 つも落とさないよう reliable・深さ 10
   ndt_pose_pub_ = create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>(
     "ndt_pose", rclcpp::QoS(rclcpp::KeepLast(10)).reliable());
+
+  // RViz の PointCloud2 の既定（reliable）でも best effort でも受け取れるよう reliable
+  aligned_cloud_pub_ = create_publisher<sensor_msgs::msg::PointCloud2>(
+    "aligned_points", rclcpp::QoS(rclcpp::KeepLast(1)).reliable());
 
   initial_pose_sub_ = create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>(
     "initialpose", rclcpp::SystemDefaultsQoS(),
@@ -570,6 +582,22 @@ void PCLLocalization::cloudReceived(const sensor_msgs::msg::PointCloud2::ConstSh
   corrent_pose_with_cov_stamped_ptr_->pose.pose.orientation = quat_msg;
 
   last_scan_ptr_ = msg;
+
+  // ---- RViz 用：この点群を、この点群の NDT の解（map → LiDAR）で map 座標に直して配信する ----
+  // RViz の /velodyne_points は TF（EKF の予測値）で変換されるので、NDT の解で見るときはこちらを表示する。
+  // 元の点群のフィールド（intensity・ring など）はそのまま。fitness で EKF に渡さなかった解でも出す
+  if (publish_aligned_cloud_ && aligned_cloud_pub_->is_activated() &&
+    aligned_cloud_pub_->get_subscription_count() > 0)
+  {
+    geometry_msgs::msg::TransformStamped T_ml =
+      tf2::eigenToTransform(Eigen::Affine3d(final_transformation.cast<double>()));
+    T_ml.header.stamp = scan_time;
+    T_ml.header.frame_id = global_frame_id_;
+    T_ml.child_frame_id = msg->header.frame_id;
+    sensor_msgs::msg::PointCloud2 aligned;
+    tf2::doTransform(*msg, aligned, T_ml);
+    aligned_cloud_pub_->publish(aligned);
+  }
 
   // ---- EKF へ：NDT の解（map → LiDAR、stamp は点群の取得時刻）を配信する ----
   // fitness による全体拒否：NDT 自体が破綻しているとみなし、EKF に渡さない
