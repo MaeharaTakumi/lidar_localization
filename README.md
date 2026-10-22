@@ -59,7 +59,7 @@ TF map -> base_link (when `publish_tf` is true)
 |fitness_reject_threshold|double|1.0|threshold for `use_fitness_reject`|
 
 `cloud_stamp_corrector` restamps point clouds whose stamps may not match this PC's clock
-(`clock_synced` in [localization_bringup](https://github.com/MaeharaTakumi/localization_bringup)):
+(`stamp_mode` in [localization_bringup](https://github.com/MaeharaTakumi/localization_bringup)):
 
 |Name|Type|Default value|Description|
 |---|---|---|---|

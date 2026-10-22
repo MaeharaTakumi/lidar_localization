@@ -1,10 +1,10 @@
-// 点群の stamp を、この PC の時計で使える時刻にして配信し直す（localization_bringup の環境ファイルの clock_synced）。
+// 点群の stamp を、この PC の時計で使える時刻にして配信し直す（mode は localization_bringup の環境ファイルの stamp_mode がそのまま入る）。
 //
-//   mode "receipt"（clock_synced: false）：t = t_受信 − min_transport_delay
-//   mode "auto"   （clock_synced: auto） ：|t_受信 − t_stamp| が auto_threshold 以上なら受信した時刻（receipt と同じ）、
-//                                         それより小さければ stamp をそのまま使う（1 つずつ判断する）
+//   mode "receipt"：t = t_受信 − min_transport_delay
+//   mode "auto"   ：|t_受信 − t_stamp| が auto_threshold 以上なら受信した時刻（receipt と同じ）、
+//                   それより小さければ stamp をそのまま使う（1 つずつ判断する）
 // sim time で /clock をまだ受け取っていない間（受信した時刻が 0）は stamp のまま渡す。
-// 時刻同期済み（clock_synced: true）の環境・Gazebo では起動しない。
+// 時刻同期済み（stamp_mode: stamp）の環境・Gazebo では起動しない。
 // 時計のずれを推定して直す mode "estimate" は 2026-10-15 に廃止した。
 #include <algorithm>
 #include <cstdint>
