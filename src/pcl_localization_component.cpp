@@ -34,14 +34,13 @@ PCLLocalization::PCLLocalization(const rclcpp::NodeOptions & options)
   declare_parameter("enable_debug_topic", false);
   declare_parameter("ndt_num_threads", 0);
 
-  // 点群の時刻の出どころ："receipt"（この PC の受信時刻）or "message"（ヘッダ stamp）
+  // 出力の時刻の出どころ："receipt"（この PC の受信時刻）、"message"（ヘッダ stamp）、
+  // "auto"（|受信時刻 − stamp| が scan_time_auto_threshold 以上なら受信時刻。1 つずつ判断する）
   declare_parameter("scan_time_source", "receipt");
+  declare_parameter("scan_time_auto_threshold", 0.1);
 
   // /pcl_pose (→/current_pose) の基準："base_link"（車両中心）or "lidar"（LiDAR 中心）
   declare_parameter("pose_output_frame", "base_link");
-
-  // RViz 専用 TF（/tf_rviz）を点群ヘッダの時刻で配信するか
-  declare_parameter("publish_rviz_tf", true);
 
   // EKF（ekf_localizer）との連携
   declare_parameter("publish_tf", true);
@@ -77,7 +76,6 @@ CallbackReturn PCLLocalization::on_activate(const rclcpp_lifecycle::State &)
   path_pub_->on_activate();
   initial_map_pub_->on_activate();
   debug_pub_->on_activate();
-  rviz_tf_pub_->on_activate();
   ndt_pose_pub_->on_activate();
 
   if (set_initial_pose_) {
@@ -149,7 +147,6 @@ CallbackReturn PCLLocalization::on_deactivate(const rclcpp_lifecycle::State &)
   path_pub_->on_deactivate();
   initial_map_pub_->on_deactivate();
   debug_pub_->on_deactivate();
-  rviz_tf_pub_->on_deactivate();
   ndt_pose_pub_->on_deactivate();
 
   RCLCPP_INFO(get_logger(), "Deactivating end");
@@ -164,7 +161,6 @@ CallbackReturn PCLLocalization::on_cleanup(const rclcpp_lifecycle::State &)
   path_pub_.reset();
   pose_pub_.reset();
   debug_pub_.reset();
-  rviz_tf_pub_.reset();
   ndt_pose_pub_.reset();
   cloud_sub_.reset();
   imu_sub_.reset();
@@ -223,7 +219,6 @@ void PCLLocalization::initializeParameters()
   get_parameter("use_fitness_reject", use_fitness_reject_);
   get_parameter("fitness_reject_threshold", fitness_reject_threshold_);
   get_parameter("pose_output_frame", pose_output_frame_);
-  get_parameter("publish_rviz_tf", publish_rviz_tf_);
   if (pose_output_frame_ != "base_link" && pose_output_frame_ != "lidar") {
     RCLCPP_WARN(
       get_logger(), "Unknown pose_output_frame \"%s\". Falling back to \"base_link\".",
@@ -231,7 +226,8 @@ void PCLLocalization::initializeParameters()
     pose_output_frame_ = "base_link";
   }
   get_parameter("scan_time_source", scan_time_source_);
-  if (scan_time_source_ != "receipt" && scan_time_source_ != "message") {
+  get_parameter("scan_time_auto_threshold", scan_time_auto_threshold_);
+  if (scan_time_source_ != "receipt" && scan_time_source_ != "message" && scan_time_source_ != "auto") {
     RCLCPP_WARN(
       get_logger(), "Unknown scan_time_source \"%s\". Falling back to \"receipt\".",
       scan_time_source_.c_str());
@@ -262,7 +258,6 @@ void PCLLocalization::initializeParameters()
   RCLCPP_INFO(get_logger(),"use_fitness_reject: %d (threshold %lf)", use_fitness_reject_, fitness_reject_threshold_);
   RCLCPP_INFO(get_logger(),"scan_time_source: %s", scan_time_source_.c_str());
   RCLCPP_INFO(get_logger(),"pose_output_frame: %s", pose_output_frame_.c_str());
-  RCLCPP_INFO(get_logger(),"publish_rviz_tf: %d", publish_rviz_tf_);
 
 }
 
@@ -305,10 +300,6 @@ void PCLLocalization::initializePubSub()
   initial_map_pub_ = create_publisher<sensor_msgs::msg::PointCloud2>(
     "initial_map",
     rclcpp::QoS(rclcpp::KeepLast(1)).transient_local().reliable());
-
-  // QoS は tf2_ros::TransformListener の購読（KeepLast(100)・reliable）に合わせる
-  rviz_tf_pub_ = create_publisher<tf2_msgs::msg::TFMessage>(
-    "tf_rviz", rclcpp::QoS(rclcpp::KeepLast(100)).reliable());
 
   debug_pub_ = create_publisher<std_msgs::msg::Float32MultiArray>(
     "localization_debug",
@@ -480,19 +471,30 @@ void PCLLocalization::cloudReceived(const sensor_msgs::msg::PointCloud2::ConstSh
   if (!map_recieved_ || !initialpose_recieved_) {return;}
 
   // ---- 時刻 ----
-  // 点群の stamp は別 PC（時刻同期なし）の時計なので、既定ではこの PC の受信時刻を使う。
-  // scan_time は出力（pcl_pose / TF / path / ndt_pose）の stamp に使う（ndt_pose は EKF の観測時刻）。
+  // scan_time は TF の初期値を引く時刻と出力（pcl_pose / TF / path / ndt_pose）の stamp に使う（ndt_pose は EKF の観測時刻）。
+  // 点群のトピック自体の stamp は変えない（RViz・MATLAB は点群の stamp のまま使う）。
   const rclcpp::Time t_receipt = now();
-  const rclcpp::Time scan_time =
-    (scan_time_source_ == "receipt") ? t_receipt : rclcpp::Time(msg->header.stamp, RCL_ROS_TIME);
-  {
-    const double offset = t_receipt.seconds() - rclcpp::Time(msg->header.stamp).seconds();
-    if (std::abs(offset) > 1.0) {
-      RCLCPP_WARN_ONCE(
-        get_logger(), "Point cloud stamp differs from this PC's clock by %.3f s (%s).",
-        offset, scan_time_source_ == "receipt" ?
-        "using receipt time" : "scan_time_source is \"message\": outputs will be stamped wrong");
-    }
+  const rclcpp::Time t_stamp(msg->header.stamp, RCL_ROS_TIME);
+  const double offset = t_receipt.seconds() - t_stamp.seconds();
+  // sim time で /clock を受け取る前（今の時刻が 0）は受信時刻が分からないので stamp のまま
+  const bool use_receipt = t_receipt.nanoseconds() != 0 &&
+    (scan_time_source_ == "receipt" ||
+    (scan_time_source_ == "auto" && std::abs(offset) >= scan_time_auto_threshold_));
+  const rclcpp::Time scan_time = use_receipt ? t_receipt : t_stamp;
+  if (std::abs(offset) > 1.0) {
+    RCLCPP_WARN_ONCE(
+      get_logger(), "Point cloud stamp differs from this PC's clock by %.3f s (%s).",
+      offset, use_receipt ?
+      "using receipt time" : "scan_time_source is \"message\": outputs will be stamped wrong");
+  }
+  if (scan_time_source_ == "auto") {
+    ++scan_time_count_;
+    scan_time_count_receipt_ += use_receipt ? 1 : 0;
+    scan_time_max_abs_diff_ = std::max(scan_time_max_abs_diff_, std::abs(offset));
+    RCLCPP_INFO_THROTTLE(
+      get_logger(), *get_clock(), 10000,
+      "auto: receipt time used for %d of %d clouds (|receipt - stamp| latest %.1f ms, max %.1f ms)",
+      scan_time_count_receipt_, scan_time_count_, offset * 1e3, scan_time_max_abs_diff_ * 1e3);
   }
 
   pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_ptr(new pcl::PointCloud<pcl::PointXYZI>);
@@ -609,16 +611,6 @@ void PCLLocalization::cloudReceived(const sensor_msgs::msg::PointCloud2::ConstSh
   transform_stamped.transform.rotation = output_pose.pose.pose.orientation;
   if (has_base_pose && publish_tf_) {
     broadcaster_.sendTransform(transform_stamped);
-  }
-
-  // RViz 用：同じ姿勢を点群ヘッダの時刻で /tf_rviz に配信する。点群の stamp は別 PC の時計で、
-  // /tf（この PC の時刻）では RViz が /velodyne_points の変換を引けないため。
-  // /tf と混ぜると時刻が 323 日ずれたデータが同じバッファに入るので、別トピックにしている
-  if (has_base_pose && publish_rviz_tf_ && rviz_tf_pub_->is_activated()) {
-    tf2_msgs::msg::TFMessage rviz_tf;
-    rviz_tf.transforms.push_back(transform_stamped);
-    rviz_tf.transforms.back().header.stamp = msg->header.stamp;
-    rviz_tf_pub_->publish(rviz_tf);
   }
 
   geometry_msgs::msg::PoseStamped::SharedPtr pose_stamped_ptr(new geometry_msgs::msg::PoseStamped);

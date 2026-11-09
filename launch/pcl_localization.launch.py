@@ -81,9 +81,6 @@ def generate_launch_description():
         executable='rviz2',
         name='rviz2',
         arguments=['-d', LaunchConfiguration('rviz_config')],
-        # 点群の stamp は別 PC の時計なので、RViz は点群と同じ時刻で配信される /tf_rviz を TF として使う
-        # （/tf_static はそのまま。静的 TF は時刻に依存しない）
-        remappings=[('/tf', '/tf_rviz')],
         output='screen'
     )
 

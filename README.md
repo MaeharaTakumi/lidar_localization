@@ -57,17 +57,8 @@ TF map -> base_link (when `publish_tf` is true)
 |tf_init_guess_timeout|double|0.05|time to wait for the TF above[sec]|
 |use_fitness_reject|bool|false|whether to drop results whose fitness score exceeds `fitness_reject_threshold` from /ndt_pose|
 |fitness_reject_threshold|double|1.0|threshold for `use_fitness_reject`|
-
-`cloud_stamp_corrector` restamps point clouds whose stamps may not match this PC's clock
-(`stamp_mode` in [localization_bringup](https://github.com/MaeharaTakumi/localization_bringup)):
-
-|Name|Type|Default value|Description|
-|---|---|---|---|
-|mode|string|"receipt"|`receipt`: always use the receipt time on this PC (minus `min_transport_delay`). `auto`: use the receipt time only when \|receipt time − stamp\| ≥ `auto_threshold`, otherwise keep the stamp (decided for each cloud)|
-|min_transport_delay|double|0.0|subtracted from the receipt time [sec]|
-|auto_threshold|double|0.1|threshold for `auto` [sec]|
-
-The clock-offset estimation mode (`estimate`) was removed on 2026-10-15.
+|scan_time_source|string|"receipt"|time used for the outputs (`/ndt_pose` stamp, TF initial guess): `receipt`: receipt time on this PC, `message`: the cloud stamp, `auto`: the receipt time only when \|receipt time − stamp\| ≥ `scan_time_auto_threshold` (decided for each cloud). The stamp of the point cloud topic itself is not changed|
+|scan_time_auto_threshold|double|0.1|threshold for `auto` [sec]|
 
 ## demo
 

@@ -28,7 +28,6 @@
 #include "nav_msgs/msg/odometry.hpp"
 #include "nav_msgs/msg/path.hpp"
 #include "std_msgs/msg/float32_multi_array.hpp"
-#include "tf2_msgs/msg/tf_message.hpp"
 
 #include <pclomp/ndt_omp.h>
 #include <pclomp/ndt_omp_impl.hpp>
@@ -82,8 +81,6 @@ public:
   rclcpp_lifecycle::LifecyclePublisher<std_msgs::msg::Float32MultiArray>::SharedPtr
     debug_pub_;
   // RViz 専用の TF（map -> base_link、stamp は点群ヘッダの時刻）。RViz は /tf をこれに remap する
-  rclcpp_lifecycle::LifecyclePublisher<tf2_msgs::msg::TFMessage>::SharedPtr
-    rviz_tf_pub_;
   // NDT の解（map → LiDAR、stamp は点群の取得時刻）。EKF（ekf_localizer）の観測
   rclcpp_lifecycle::LifecyclePublisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr
     ndt_pose_pub_;
@@ -134,11 +131,16 @@ public:
 
   int ndt_num_threads_{0};
 
-  // 点群の時刻の出どころ："receipt"（この PC の受信時刻）or "message"（ヘッダ stamp）。
-  // 点群は別 PC（時刻同期なし）が stamp を付けているので既定は receipt
+  // 出力の時刻（/ndt_pose の stamp、TF の初期値を引く時刻）の出どころ："receipt"（この PC の受信時刻）、
+  // "message"（ヘッダ stamp）、"auto"（|受信時刻 − stamp| が scan_time_auto_threshold 以上なら受信時刻）。
+  // 点群のトピック自体の stamp は変えない
   std::string scan_time_source_{"receipt"};
+  double scan_time_auto_threshold_{0.1};
+  // "auto" で受信時刻を使った数・全体の数・|受信時刻 − stamp| の最大（ログ用）
+  int scan_time_count_{0};
+  int scan_time_count_receipt_{0};
+  double scan_time_max_abs_diff_{0.0};
   std::string pose_output_frame_{"base_link"};
-  bool publish_rviz_tf_{true};
 
   // map → base_frame_id の TF を配信するか（EKF が配信するときは false）
   bool publish_tf_{true};

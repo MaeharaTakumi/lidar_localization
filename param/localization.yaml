@@ -35,10 +35,11 @@
       base_frame_id: base_link
       # enable_debug: true
 
-      # 点群の時刻。点群は別 PC（時刻同期なし）が stamp を付けているため既定は受信時刻
-      #   "receipt" : この PC で受信した時刻（now()）。出力と /ndt_pose の stamp に使う
-      #   "message" : 点群ヘッダの stamp（時刻同期済み・Gazebo・cloud_stamp_corrector で直した点群）
-      # localization_bringup から起動するときは "message"（同期していない環境は cloud_stamp_corrector が直す）
+      # 出力と /ndt_pose の stamp、TF の初期値を引く時刻（点群のトピック自体の stamp は変えない）
+      #   "receipt" : この PC で受信した時刻（now()）
+      #   "message" : 点群ヘッダの stamp（時刻同期済み・Gazebo）
+      #   "auto"    : |受信した時刻 − stamp| が scan_time_auto_threshold（既定 0.1 s）以上なら受信した時刻、小さければ stamp
+      # localization_bringup から起動するときは、環境ファイルの stamp_mode（stamp -> "message"）で launch が決める
       scan_time_source: "message"
 
       # /pcl_pose (→/current_pose) の基準。TF（map -> base_link）と /path は常に base_link
@@ -47,9 +48,6 @@
       # base_link への変換に使う取付 base_link -> LiDAR は静的 TF から読む
       pose_output_frame: "lidar"
 
-      # RViz 専用 TF。map -> base_link を点群ヘッダの時刻で /tf_rviz に配信する
-      # （launch で RViz の /tf を /tf_rviz に remap。/tf と /current_pose はこの PC の時刻のまま）
-      publish_rviz_tf: true
 
       # ---- EKF（ekf_localizer）との連携 ----
       # 単体で使うときは既定のまま。localization_bringup で EKF と起動するときは launch が上書きする

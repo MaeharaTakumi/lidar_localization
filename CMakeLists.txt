@@ -20,7 +20,6 @@ find_package(sensor_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(tf2_ros REQUIRED)
-find_package(tf2_msgs REQUIRED)
 find_package(tf2_geometry_msgs  REQUIRED)
 find_package(tf2_sensor_msgs  REQUIRED)
 find_package(tf2_eigen REQUIRED)
@@ -50,7 +49,6 @@ ament_target_dependencies(pcl_localization_component
   sensor_msgs
   nav_msgs
   std_msgs
-  tf2_msgs
   pcl_conversions
   ndt_omp_ros2
 )
@@ -74,15 +72,10 @@ link_directories(
 )
 add_definitions(${PCL_DEFINITIONS})
 
-# 点群の stamp を、この PC の時計での取得時刻に直して配信し直す（時刻同期していない環境用）
-add_executable(cloud_stamp_corrector src/cloud_stamp_corrector.cpp)
-ament_target_dependencies(cloud_stamp_corrector rclcpp sensor_msgs)
-
 ament_export_libraries(pcl_localization_component)
 
 install(TARGETS
   pcl_localization_node
-  cloud_stamp_corrector
   DESTINATION lib/${PROJECT_NAME})
 
 install(TARGETS
