@@ -33,11 +33,11 @@ def generate_launch_description():
     map_path_arg = DeclareLaunchArgument(
         'map_path_arg',
         default_value='',
-        description='Full path to the PCD map file to override the default in YAML.'
+        description='Full path to the PCD map file.'
     )
 
-    # NDT だけを起動する（実機用）。EKF と合わせて環境ごとに起動するときは
-    #   ros2 launch localization_bringup localization.launch.py env:=real
+    # NDT だけを既定値で起動する（パラメータファイルは使わない。地図は map_path_arg）。EKF と合わせて環境ごとに起動するときは
+    #   ros2 launch localization_bringup localization.launch.py env:=blue
 
     # base_link -> velodyne（実機の取付）。ノードは base_link への変換にこの TF を使う
     lidar_tf = launch_ros.actions.Node(
@@ -56,24 +56,14 @@ def generate_launch_description():
         arguments=['0','0','0','0','0','0','1','base_link','imu_link']
         )
 
-    localization_param_dir = launch.substitutions.LaunchConfiguration(
-        'localization_param_dir',
-        default=os.path.join(
-            get_package_share_directory('pcl_localization_ros2'),
-            'param',
-            'localization.yaml'))
-
     pcl_localization = launch_ros.actions.LifecycleNode(
         name='pcl_localization',
         namespace='',
         package='pcl_localization_ros2',
         executable='pcl_localization_node',
-        parameters=[
-            localization_param_dir,
-            {'map_path': LaunchConfiguration('map_path_arg')}
-        ],
-        remappings=[('/cloud','/velodyne_points'),
-                    ('/pcl_pose', '/current_pose')],
+        parameters=[{'map_path': LaunchConfiguration('map_path_arg')}],
+        # NDT の解は /current_pose（RViz と、研究室の MATLAB（whill_common_matlab の CR）の実機モードが購読する）
+        remappings=[('pcl_pose', '/current_pose')],
         output='screen')
 
     rviz_node = Node(

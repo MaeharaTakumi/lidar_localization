@@ -9,19 +9,22 @@ PCLLocalization::PCLLocalization(const rclcpp::NodeOptions & options)
   declare_parameter("global_frame_id", "map");
   declare_parameter("odom_frame_id", "odom");
   declare_parameter("base_frame_id", "base_link");
-  declare_parameter("registration_method", "NDT");
-  declare_parameter("score_threshold", 2.0);
+  // 既定値は 2026-11-11 まで param/localization.yaml にあった値（パラメータファイルはこのパッケージに置かない。
+  // 環境ごとの値は localization_bringup の param/<env>/pcl_localization.yaml）
+  declare_parameter("registration_method", "NDT_OMP");
+  declare_parameter("score_threshold", 0.2);
   declare_parameter("ndt_resolution", 1.0);
   declare_parameter("ndt_step_size", 0.1);
   declare_parameter("transform_epsilon", 0.01);
-  declare_parameter("voxel_leaf_size", 0.2);
-  declare_parameter("map_viz_leaf_size", 0.2);
+  declare_parameter("voxel_leaf_size", 0.1);
+  declare_parameter("map_viz_leaf_size", 0.1);
   declare_parameter("scan_max_range", 100.0);
-  declare_parameter("scan_min_range", 1.0);
-  declare_parameter("scan_period", 0.1);
-  declare_parameter("use_pcd_map", false);
-  declare_parameter("map_path", "/map/map.pcd");
-  declare_parameter("set_initial_pose", false);
+  declare_parameter("scan_min_range", 0.1);
+  declare_parameter("scan_period", 0.05);
+  declare_parameter("use_pcd_map", true);
+  declare_parameter("map_path", "");
+  // 初期姿勢（LiDAR の姿勢）。既定は地図の原点・回転なし
+  declare_parameter("set_initial_pose", true);
   declare_parameter("initial_pose_x", 0.0);
   declare_parameter("initial_pose_y", 0.0);
   declare_parameter("initial_pose_z", 0.0);
@@ -31,17 +34,17 @@ PCLLocalization::PCLLocalization(const rclcpp::NodeOptions & options)
   declare_parameter("initial_pose_qw", 1.0);
   declare_parameter("use_imu", false);
   declare_parameter("enable_debug", false);
-  declare_parameter("enable_debug_topic", false);
+  declare_parameter("enable_debug_topic", true);
   declare_parameter("ndt_num_threads", 0);
 
   // 出力の時刻の決め方（localization_bringup の環境ファイルの stamp_mode と同じ名前・値）：
   // "stamp"（ヘッダ stamp）、"receipt"（この PC の受信時刻）、
   // "auto"（|受信時刻 − stamp| が stamp_auto_threshold 以上なら受信時刻。1 つずつ判断する）
-  declare_parameter("stamp_mode", "receipt");
+  declare_parameter("stamp_mode", "stamp");
   declare_parameter("stamp_auto_threshold", 0.1);
 
   // /pcl_pose (→/current_pose) の基準："base_link"（車両中心）or "lidar"（LiDAR 中心）
-  declare_parameter("pose_output_frame", "base_link");
+  declare_parameter("pose_output_frame", "lidar");
 
   // EKF（ekf_localizer）との連携
   declare_parameter("publish_tf", true);
@@ -223,17 +226,17 @@ void PCLLocalization::initializeParameters()
   get_parameter("pose_output_frame", pose_output_frame_);
   if (pose_output_frame_ != "base_link" && pose_output_frame_ != "lidar") {
     RCLCPP_WARN(
-      get_logger(), "Unknown pose_output_frame \"%s\". Falling back to \"base_link\".",
+      get_logger(), "Unknown pose_output_frame \"%s\". Falling back to \"lidar\".",
       pose_output_frame_.c_str());
-    pose_output_frame_ = "base_link";
+    pose_output_frame_ = "lidar";
   }
   get_parameter("stamp_mode", stamp_mode_);
   get_parameter("stamp_auto_threshold", stamp_auto_threshold_);
   if (stamp_mode_ != "stamp" && stamp_mode_ != "receipt" && stamp_mode_ != "auto") {
     RCLCPP_WARN(
-      get_logger(), "Unknown stamp_mode \"%s\". Falling back to \"receipt\".",
+      get_logger(), "Unknown stamp_mode \"%s\". Falling back to \"stamp\".",
       stamp_mode_.c_str());
-    stamp_mode_ = "receipt";
+    stamp_mode_ = "stamp";
   }
 
   RCLCPP_INFO(get_logger(),"global_frame_id: %s", global_frame_id_.c_str());

@@ -134,13 +134,13 @@ public:
   // 出力の時刻（/ndt_pose の stamp、TF の初期値を引く時刻）の決め方："stamp"（ヘッダ stamp）、
   // "receipt"（この PC の受信時刻）、"auto"（|受信時刻 − stamp| が stamp_auto_threshold 以上なら受信時刻）。
   // 点群のトピック自体の stamp は変えない
-  std::string stamp_mode_{"receipt"};
+  std::string stamp_mode_{"stamp"};
   double stamp_auto_threshold_{0.1};
   // "auto" で受信時刻を使った数・全体の数・|受信時刻 − stamp| の最大（ログ用）
   int scan_time_count_{0};
   int scan_time_count_receipt_{0};
   double scan_time_max_abs_diff_{0.0};
-  std::string pose_output_frame_{"base_link"};
+  std::string pose_output_frame_{"lidar"};
 
   // map → base_frame_id の TF を配信するか（EKF が配信するときは false）
   bool publish_tf_{true};
