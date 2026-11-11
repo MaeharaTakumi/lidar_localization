@@ -34,10 +34,11 @@ PCLLocalization::PCLLocalization(const rclcpp::NodeOptions & options)
   declare_parameter("enable_debug_topic", false);
   declare_parameter("ndt_num_threads", 0);
 
-  // 出力の時刻の出どころ："receipt"（この PC の受信時刻）、"message"（ヘッダ stamp）、
-  // "auto"（|受信時刻 − stamp| が scan_time_auto_threshold 以上なら受信時刻。1 つずつ判断する）
-  declare_parameter("scan_time_source", "receipt");
-  declare_parameter("scan_time_auto_threshold", 0.1);
+  // 出力の時刻の決め方（localization_bringup の環境ファイルの stamp_mode と同じ名前・値）：
+  // "stamp"（ヘッダ stamp）、"receipt"（この PC の受信時刻）、
+  // "auto"（|受信時刻 − stamp| が stamp_auto_threshold 以上なら受信時刻。1 つずつ判断する）
+  declare_parameter("stamp_mode", "receipt");
+  declare_parameter("stamp_auto_threshold", 0.1);
 
   // /pcl_pose (→/current_pose) の基準："base_link"（車両中心）or "lidar"（LiDAR 中心）
   declare_parameter("pose_output_frame", "base_link");
@@ -61,8 +62,9 @@ CallbackReturn PCLLocalization::on_configure(const rclcpp_lifecycle::State &)
   initializeRegistration();
   has_mount_ = false;
 
-  path_ptr_ = std::make_shared<nav_msgs::msg::Path>();
-  path_ptr_->header.frame_id = global_frame_id_;
+  // /path（NDT の解の軌跡）は配信しない（2026-11-11）：読み手がいないのに、点群ごとに姿勢を 1 つ足して軌跡全体を配信し、伸び続けていた
+  // path_ptr_ = std::make_shared<nav_msgs::msg::Path>();
+  // path_ptr_->header.frame_id = global_frame_id_;
 
   RCLCPP_INFO(get_logger(), "Configuring end");
   return CallbackReturn::SUCCESS;
@@ -73,7 +75,7 @@ CallbackReturn PCLLocalization::on_activate(const rclcpp_lifecycle::State &)
   RCLCPP_INFO(get_logger(), "Activating");
 
   pose_pub_->on_activate();
-  path_pub_->on_activate();
+  // path_pub_->on_activate();
   initial_map_pub_->on_activate();
   debug_pub_->on_activate();
   ndt_pose_pub_->on_activate();
@@ -91,11 +93,11 @@ CallbackReturn PCLLocalization::on_activate(const rclcpp_lifecycle::State &)
     msg->pose.pose.orientation.z = initial_pose_qz_;
     msg->pose.pose.orientation.w = initial_pose_qw_;
 
-    geometry_msgs::msg::PoseStamped::SharedPtr pose_stamped(new geometry_msgs::msg::PoseStamped);
-    pose_stamped->header.stamp = msg->header.stamp;
-    pose_stamped->header.frame_id = global_frame_id_;
-    pose_stamped->pose = msg->pose.pose;
-    path_ptr_->poses.push_back(*pose_stamped);
+    // geometry_msgs::msg::PoseStamped::SharedPtr pose_stamped(new geometry_msgs::msg::PoseStamped);
+    // pose_stamped->header.stamp = msg->header.stamp;
+    // pose_stamped->header.frame_id = global_frame_id_;
+    // pose_stamped->pose = msg->pose.pose;
+    // path_ptr_->poses.push_back(*pose_stamped);
 
     initialPoseReceived(msg);
   }
@@ -144,7 +146,7 @@ CallbackReturn PCLLocalization::on_deactivate(const rclcpp_lifecycle::State &)
   RCLCPP_INFO(get_logger(), "Deactivating");
 
   pose_pub_->on_deactivate();
-  path_pub_->on_deactivate();
+  // path_pub_->on_deactivate();
   initial_map_pub_->on_deactivate();
   debug_pub_->on_deactivate();
   ndt_pose_pub_->on_deactivate();
@@ -158,7 +160,7 @@ CallbackReturn PCLLocalization::on_cleanup(const rclcpp_lifecycle::State &)
   RCLCPP_INFO(get_logger(), "Cleaning Up");
   initial_pose_sub_.reset();
   initial_map_pub_.reset();
-  path_pub_.reset();
+  // path_pub_.reset();
   pose_pub_.reset();
   debug_pub_.reset();
   ndt_pose_pub_.reset();
@@ -225,13 +227,13 @@ void PCLLocalization::initializeParameters()
       pose_output_frame_.c_str());
     pose_output_frame_ = "base_link";
   }
-  get_parameter("scan_time_source", scan_time_source_);
-  get_parameter("scan_time_auto_threshold", scan_time_auto_threshold_);
-  if (scan_time_source_ != "receipt" && scan_time_source_ != "message" && scan_time_source_ != "auto") {
+  get_parameter("stamp_mode", stamp_mode_);
+  get_parameter("stamp_auto_threshold", stamp_auto_threshold_);
+  if (stamp_mode_ != "stamp" && stamp_mode_ != "receipt" && stamp_mode_ != "auto") {
     RCLCPP_WARN(
-      get_logger(), "Unknown scan_time_source \"%s\". Falling back to \"receipt\".",
-      scan_time_source_.c_str());
-    scan_time_source_ = "receipt";
+      get_logger(), "Unknown stamp_mode \"%s\". Falling back to \"receipt\".",
+      stamp_mode_.c_str());
+    stamp_mode_ = "receipt";
   }
 
   RCLCPP_INFO(get_logger(),"global_frame_id: %s", global_frame_id_.c_str());
@@ -256,7 +258,7 @@ void PCLLocalization::initializeParameters()
   RCLCPP_INFO(get_logger(),"publish_tf: %d", publish_tf_);
   RCLCPP_INFO(get_logger(),"use_tf_init_guess: %d (timeout %lf s)", use_tf_init_guess_, tf_init_guess_timeout_);
   RCLCPP_INFO(get_logger(),"use_fitness_reject: %d (threshold %lf)", use_fitness_reject_, fitness_reject_threshold_);
-  RCLCPP_INFO(get_logger(),"scan_time_source: %s", scan_time_source_.c_str());
+  RCLCPP_INFO(get_logger(),"stamp_mode: %s (stamp_auto_threshold %lf s)", stamp_mode_.c_str(), stamp_auto_threshold_);
   RCLCPP_INFO(get_logger(),"pose_output_frame: %s", pose_output_frame_.c_str());
 
 }
@@ -276,7 +278,7 @@ bool PCLLocalization::lookupMount(const std::string & lidar_frame, Eigen::Affine
     } catch (const tf2::TransformException & ex) {
       RCLCPP_WARN_THROTTLE(
         get_logger(), *get_clock(), 5000,
-        "No TF %s -> %s (%s). TF, path and base-frame pose are not published.",
+        "No TF %s -> %s (%s). TF and base-frame pose are not published.",
         base_frame_id_.c_str(), lidar_frame.c_str(), ex.what());
       return false;
     }
@@ -293,9 +295,10 @@ void PCLLocalization::initializePubSub()
     "pcl_pose",
     rclcpp::QoS(rclcpp::KeepLast(1)).transient_local().reliable());
 
-  path_pub_ = create_publisher<nav_msgs::msg::Path>(
-    "path",
-    rclcpp::QoS(rclcpp::KeepLast(1)).transient_local().reliable());
+  // /path（NDT の解の軌跡）は配信しない（2026-11-11）：読み手がいないのに、点群ごとに姿勢を 1 つ足して軌跡全体を配信し、伸び続けていた
+  // path_pub_ = create_publisher<nav_msgs::msg::Path>(
+  //   "path",
+  //   rclcpp::QoS(rclcpp::KeepLast(1)).transient_local().reliable());
 
   initial_map_pub_ = create_publisher<sensor_msgs::msg::PointCloud2>(
     "initial_map",
@@ -471,23 +474,23 @@ void PCLLocalization::cloudReceived(const sensor_msgs::msg::PointCloud2::ConstSh
   if (!map_recieved_ || !initialpose_recieved_) {return;}
 
   // ---- 時刻 ----
-  // scan_time は TF の初期値を引く時刻と出力（pcl_pose / TF / path / ndt_pose）の stamp に使う（ndt_pose は EKF の観測時刻）。
+  // scan_time は TF の初期値を引く時刻と出力（pcl_pose / TF / ndt_pose）の stamp に使う（ndt_pose は EKF の観測時刻）。
   // 点群のトピック自体の stamp は変えない（RViz・MATLAB は点群の stamp のまま使う）。
   const rclcpp::Time t_receipt = now();
   const rclcpp::Time t_stamp(msg->header.stamp, RCL_ROS_TIME);
   const double offset = t_receipt.seconds() - t_stamp.seconds();
   // sim time で /clock を受け取る前（今の時刻が 0）は受信時刻が分からないので stamp のまま
   const bool use_receipt = t_receipt.nanoseconds() != 0 &&
-    (scan_time_source_ == "receipt" ||
-    (scan_time_source_ == "auto" && std::abs(offset) >= scan_time_auto_threshold_));
+    (stamp_mode_ == "receipt" ||
+    (stamp_mode_ == "auto" && std::abs(offset) >= stamp_auto_threshold_));
   const rclcpp::Time scan_time = use_receipt ? t_receipt : t_stamp;
   if (std::abs(offset) > 1.0) {
     RCLCPP_WARN_ONCE(
       get_logger(), "Point cloud stamp differs from this PC's clock by %.3f s (%s).",
       offset, use_receipt ?
-      "using receipt time" : "scan_time_source is \"message\": outputs will be stamped wrong");
+      "using receipt time" : "stamp_mode is \"stamp\": outputs will be stamped wrong");
   }
-  if (scan_time_source_ == "auto") {
+  if (stamp_mode_ == "auto") {
     ++scan_time_count_;
     scan_time_count_receipt_ += use_receipt ? 1 : 0;
     scan_time_max_abs_diff_ = std::max(scan_time_max_abs_diff_, std::abs(offset));
@@ -584,7 +587,7 @@ void PCLLocalization::cloudReceived(const sensor_msgs::msg::PointCloud2::ConstSh
   }
 
   // ---- 出力（NDT の解）----
-  // /pcl_pose は pose_output_frame で LiDAR 中心にできる。TF と /path は常に base_frame_id
+  // /pcl_pose は pose_output_frame で LiDAR 中心にできる。TF は常に base_frame_id
   geometry_msgs::msg::PoseWithCovarianceStamped output_pose = *corrent_pose_with_cov_stamped_ptr_;
   if (pose_output_frame_ == "lidar") {
     pose_pub_->publish(output_pose);
@@ -613,14 +616,15 @@ void PCLLocalization::cloudReceived(const sensor_msgs::msg::PointCloud2::ConstSh
     broadcaster_.sendTransform(transform_stamped);
   }
 
-  geometry_msgs::msg::PoseStamped::SharedPtr pose_stamped_ptr(new geometry_msgs::msg::PoseStamped);
-  pose_stamped_ptr->header.stamp = scan_time;
-  pose_stamped_ptr->header.frame_id = global_frame_id_;
-  pose_stamped_ptr->pose = output_pose.pose.pose;
-  if (has_base_pose) {
-    path_ptr_->poses.push_back(*pose_stamped_ptr);
-    path_pub_->publish(*path_ptr_);
-  }
+  // /path（NDT の解の軌跡）は配信しない（2026-11-11）：読み手がいないのに、点群ごとに姿勢を 1 つ足して軌跡全体を配信し、伸び続けていた
+  // geometry_msgs::msg::PoseStamped::SharedPtr pose_stamped_ptr(new geometry_msgs::msg::PoseStamped);
+  // pose_stamped_ptr->header.stamp = scan_time;
+  // pose_stamped_ptr->header.frame_id = global_frame_id_;
+  // pose_stamped_ptr->pose = output_pose.pose.pose;
+  // if (has_base_pose) {
+  //   path_ptr_->poses.push_back(*pose_stamped_ptr);
+  //   path_pub_->publish(*path_ptr_);
+  // }
 
   if (enable_debug_ || enable_debug_topic_) {
     /* delta_angle check

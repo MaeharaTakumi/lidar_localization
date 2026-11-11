@@ -35,14 +35,14 @@
       base_frame_id: base_link
       # enable_debug: true
 
-      # 出力と /ndt_pose の stamp、TF の初期値を引く時刻（点群のトピック自体の stamp は変えない）
+      # 出力と /ndt_pose の stamp、TF の初期値を引く時刻の決め方（点群のトピック自体の stamp は変えない）。
+      # localization_bringup の環境ファイルの stamp_mode と同じ名前・値（そこから起動するときは launch がその値を入れる）
+      #   "stamp"   : 点群ヘッダの stamp（時刻同期済み・Gazebo）
       #   "receipt" : この PC で受信した時刻（now()）
-      #   "message" : 点群ヘッダの stamp（時刻同期済み・Gazebo）
-      #   "auto"    : |受信した時刻 − stamp| が scan_time_auto_threshold（既定 0.1 s）以上なら受信した時刻、小さければ stamp
-      # localization_bringup から起動するときは、環境ファイルの stamp_mode（stamp -> "message"）で launch が決める
-      scan_time_source: "message"
+      #   "auto"    : |受信した時刻 − stamp| が stamp_auto_threshold（既定 0.1 s）以上なら受信した時刻、小さければ stamp
+      stamp_mode: "stamp"
 
-      # /pcl_pose (→/current_pose) の基準。TF（map -> base_link）と /path は常に base_link
+      # /pcl_pose (→/current_pose) の基準。TF（map -> base_link）は常に base_link
       #   "base_link" : 車両中心
       #   "lidar"     : LiDAR 中心（NDT の解そのもの）
       # base_link への変換に使う取付 base_link -> LiDAR は静的 TF から読む

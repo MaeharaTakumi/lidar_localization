@@ -74,13 +74,13 @@ public:
     initial_pose_sub_;
   rclcpp_lifecycle::LifecyclePublisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr
     pose_pub_;
-  rclcpp_lifecycle::LifecyclePublisher<nav_msgs::msg::Path>::SharedPtr
-    path_pub_;
+  // /path は配信しない（2026-11-11。読み手がいないのに伸び続けていた）
+  // rclcpp_lifecycle::LifecyclePublisher<nav_msgs::msg::Path>::SharedPtr
+  //   path_pub_;
   rclcpp_lifecycle::LifecyclePublisher<sensor_msgs::msg::PointCloud2>::SharedPtr
     initial_map_pub_;
   rclcpp_lifecycle::LifecyclePublisher<std_msgs::msg::Float32MultiArray>::SharedPtr
     debug_pub_;
-  // RViz 専用の TF（map -> base_link、stamp は点群ヘッダの時刻）。RViz は /tf をこれに remap する
   // NDT の解（map → LiDAR、stamp は点群の取得時刻）。EKF（ekf_localizer）の観測
   rclcpp_lifecycle::LifecyclePublisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr
     ndt_pose_pub_;
@@ -94,7 +94,7 @@ public:
   boost::shared_ptr<pcl::Registration<pcl::PointXYZI, pcl::PointXYZI>> registration_;
   pcl::VoxelGrid<pcl::PointXYZI> voxel_grid_filter_;
   geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr corrent_pose_with_cov_stamped_ptr_;
-  nav_msgs::msg::Path::SharedPtr path_ptr_;
+  // nav_msgs::msg::Path::SharedPtr path_ptr_;
   sensor_msgs::msg::PointCloud2::ConstSharedPtr last_scan_ptr_;
 
   bool map_recieved_{false};
@@ -131,11 +131,11 @@ public:
 
   int ndt_num_threads_{0};
 
-  // 出力の時刻（/ndt_pose の stamp、TF の初期値を引く時刻）の出どころ："receipt"（この PC の受信時刻）、
-  // "message"（ヘッダ stamp）、"auto"（|受信時刻 − stamp| が scan_time_auto_threshold 以上なら受信時刻）。
+  // 出力の時刻（/ndt_pose の stamp、TF の初期値を引く時刻）の決め方："stamp"（ヘッダ stamp）、
+  // "receipt"（この PC の受信時刻）、"auto"（|受信時刻 − stamp| が stamp_auto_threshold 以上なら受信時刻）。
   // 点群のトピック自体の stamp は変えない
-  std::string scan_time_source_{"receipt"};
-  double scan_time_auto_threshold_{0.1};
+  std::string stamp_mode_{"receipt"};
+  double stamp_auto_threshold_{0.1};
   // "auto" で受信時刻を使った数・全体の数・|受信時刻 − stamp| の最大（ログ用）
   int scan_time_count_{0};
   int scan_time_count_receipt_{0};

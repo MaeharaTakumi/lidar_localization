@@ -22,7 +22,7 @@ TF base_link -> LiDAR (static, used to convert the NDT result to base_link)
 - output  
 /pcl_pose (geometry_msgs/PoseStamped)  
 /ndt_pose (geometry_msgs/PoseWithCovarianceStamped)(map -> LiDAR, stamped with the scan time; input of ekf_localizer)  
-/path (nav_msgs/Path)  
+(/path (nav_msgs/Path) is commented out in the source since 2026-11-11: nothing subscribed to it, and the whole growing path was published for every scan)  
 TF map -> base_link (when `publish_tf` is true)  
 /initial_map (sensor_msgs/PointCloud2)(when `use_pcd_map` is true)  
 
@@ -57,8 +57,8 @@ TF map -> base_link (when `publish_tf` is true)
 |tf_init_guess_timeout|double|0.05|time to wait for the TF above[sec]|
 |use_fitness_reject|bool|false|whether to drop results whose fitness score exceeds `fitness_reject_threshold` from /ndt_pose|
 |fitness_reject_threshold|double|1.0|threshold for `use_fitness_reject`|
-|scan_time_source|string|"receipt"|time used for the outputs (`/ndt_pose` stamp, TF initial guess): `receipt`: receipt time on this PC, `message`: the cloud stamp, `auto`: the receipt time only when \|receipt time − stamp\| ≥ `scan_time_auto_threshold` (decided for each cloud). The stamp of the point cloud topic itself is not changed|
-|scan_time_auto_threshold|double|0.1|threshold for `auto` [sec]|
+|stamp_mode|string|"receipt"|time used for the outputs (`/ndt_pose` stamp, TF initial guess): `stamp`: the cloud stamp, `receipt`: receipt time on this PC, `auto`: the receipt time only when \|receipt time − stamp\| ≥ `stamp_auto_threshold` (decided for each cloud). The stamp of the point cloud topic itself is not changed. Same name and values as `stamp_mode` of the localization_bringup env files|
+|stamp_auto_threshold|double|0.1|threshold for `auto` [sec]|
 
 ## demo
 
