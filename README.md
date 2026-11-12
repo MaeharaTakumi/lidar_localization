@@ -12,19 +12,20 @@ Green: path, Red: map
 
 ## IO
 - input  
-/cloud  (sensor_msgs/PointCloud2)  
-/map  (sensor_msgs/PointCloud2)  
-/initialpose (geometry_msgs/PoseStamed)(when `set_initial_pose` is false)  
-/imu  (sensor_msgs/Imu)(optional)  
-TF map -> base_link at the scan time (when `use_tf_init_guess` is true, e.g. from [ekf_localizer](https://github.com/MaeharaTakumi/ekf_localizer))  
-TF base_link -> LiDAR (static, used to convert the NDT result to base_link)  
+/velodyne_points  (sensor_msgs/PointCloud2)(best effort, depth 1)  
+/map  (sensor_msgs/PointCloud2)(a map from a topic instead of `map_path`; reliable, transient local)  
+/initialpose (geometry_msgs/PoseWithCovarianceStamped)(always subscribed; the LiDAR pose in `global_frame_id`. The initial pose of `set_initial_pose` is given in the same way at start-up)  
+/imu  (sensor_msgs/Imu)(when `use_imu` is true)  
+TF `global_frame_id` -> the cloud frame (LiDAR) at the scan time (when `use_tf_init_guess` is true; e.g. map -> base_link from [ekf_localizer](https://github.com/MaeharaTakumi/ekf_localizer) and the static mount)  
+TF `base_frame_id` -> LiDAR (static, used to convert the NDT result to `base_frame_id`)  
 
 - output  
-/pcl_pose (geometry_msgs/PoseStamped)  
-/ndt_pose (geometry_msgs/PoseWithCovarianceStamped)(map -> LiDAR, stamped with the scan time; input of ekf_localizer)  
+/pcl_pose (geometry_msgs/PoseWithCovarianceStamped)(reliable, transient local; map -> LiDAR, or map -> `base_frame_id` when `pose_output_frame` is "base_link")  
+/ndt_pose (geometry_msgs/PoseWithCovarianceStamped)(reliable, depth 10; map -> LiDAR, stamped with the scan time, covariance 0; input of ekf_localizer)  
+/localization_debug (std_msgs/Float32MultiArray)(when `enable_debug_topic` is true; [points, align time s, converged, fitness, angle_diff deg])  
 (/path (nav_msgs/Path) is commented out in the source since 2026-11-11: nothing subscribed to it, and the whole growing path was published for every scan)  
-TF map -> base_link (when `publish_tf` is true)  
-/initial_map (sensor_msgs/PointCloud2)(when `use_pcd_map` is true)  
+TF map -> `base_frame_id` (when `publish_tf` is true)  
+/initial_map (sensor_msgs/PointCloud2)(when `use_pcd_map` is true; down sampled by `map_viz_leaf_size`)  
 
 ## params
 
@@ -76,10 +77,10 @@ To use ros1 rosbag , use [rosbags](https://pypi.org/project/rosbags/).
 The Velodyne VLP-16 was used in this data.
 
 Before running, put `bin_tc-2017-10-15-ndmap.pcd` into your `map` directory and  
-pass it with `map_path_arg:=<path>` (`ros2 launch pcl_localization_ros2 pcl_localization.launch.py map_path_arg:=...`).
+pass it with `map_path_arg:=<path>`. The launch also starts RViz with `rviz/localization2.rviz` (change it with `rviz_config:=<path>`)
+and publishes the static TF base_link -> velodyne (x −0.17 m, z 1.2 m, yaw −0.017 rad) and base_link -> imu_link.
 ```
-rviz2 -d src/pcl_localization_ros2/rviz/localization.rviz
-ros2 launch pcl_localization_ros2 pcl_localization.launch.py
+ros2 launch pcl_localization_ros2 pcl_localization.launch.py map_path_arg:=<path>/bin_tc-2017-10-15-ndmap.pcd
 ros2 bag play tc_2017-10-15-15-34-02_free_download/
 ```
 
