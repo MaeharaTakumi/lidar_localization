@@ -47,11 +47,8 @@ Visualization Manager:
       Plane Cell Count: 10
       Reference Frame: <Fixed Frame>
       Value: true
-    - Alpha: 0.699999988079071
-      Axes Length: 1
-      Axes Radius: 0.10000000149011612
-      Class: rviz_default_plugins/PoseWithCovariance
-      Color: 255; 25; 0
+    - Angle Tolerance: 0
+      Class: rviz_default_plugins/Odometry
       Covariance:
         Orientation:
           Alpha: 0.5
@@ -68,19 +65,26 @@ Visualization Manager:
           Value: true
         Value: true
       Enabled: true
-      Head Length: 0.30000001192092896
-      Head Radius: 0.5
-      Name: PoseWithCovariance
-      Shaft Length: 1
-      Shaft Radius: 0.20000000298023224
-      Shape: Arrow
+      Keep: 1
+      Name: EKF (/ekf_odom)
+      Position Tolerance: 0
+      Shape:
+        Alpha: 0.699999988079071
+        Axes Length: 1
+        Axes Radius: 0.10000000149011612
+        Color: 255; 25; 0
+        Head Length: 0.30000001192092896
+        Head Radius: 0.5
+        Shaft Length: 1
+        Shaft Radius: 0.20000000298023224
+        Value: Arrow
       Topic:
         Depth: 5
         Durability Policy: Volatile
         Filter size: 10
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: /current_pose
+        Value: /ekf_odom
       Value: true
     - Class: rviz_default_plugins/TF
       Enabled: true
