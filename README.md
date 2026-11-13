@@ -79,6 +79,7 @@ The Velodyne VLP-16 was used in this data.
 Before running, put `bin_tc-2017-10-15-ndmap.pcd` into your `map` directory and  
 pass it with `map_path_arg:=<path>`. The launch also starts RViz with `rviz/localization2.rviz` (change it with `rviz_config:=<path>`)
 and publishes the static TF base_link -> velodyne (x −0.17 m, z 1.2 m, yaw −0.017 rad) and base_link -> imu_link.
+`localization2.rviz` shows `/current_pose` (red arrow: the NDT result as the LiDAR pose with `pose_output_frame: lidar`), the TF frames (TF display), `/velodyne_points` and `/initial_map`.
 ```
 ros2 launch pcl_localization_ros2 pcl_localization.launch.py map_path_arg:=<path>/bin_tc-2017-10-15-ndmap.pcd
 ros2 bag play tc_2017-10-15-15-34-02_free_download/
